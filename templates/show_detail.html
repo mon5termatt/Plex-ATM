@@ -33,6 +33,15 @@
         <label>Search Query (Romaji)
           <input type="text" id="search-query-input" name="search_query" value="{{ initial_search_query }}">
         </label>
+        <label>AnimeThemes URL Override (optional, per show)
+          <input
+            type="url"
+            id="animethemes-url-override-input"
+            name="animethemes_url_override"
+            value="{{ initial_animethemes_url_override }}"
+            placeholder="https://api.animethemes.moe/anime/slug or filtered anime URL"
+          >
+        </label>
         {% if sonarr_alternate_queries %}
         <div class="alt-title-block">
           <strong>Sonarr Alternate Titles</strong>
@@ -50,6 +59,9 @@
         <button type="submit" id="find-themes-submit-btn">Find Themes</button>
       </form>
       <p id="find-themes-status" class="muted-text" hidden></p>
+      <p id="animethemes-manual-search" class="muted-text" hidden>
+        No results found. <a id="animethemes-manual-search-link" class="sort-link" target="_blank" rel="noopener noreferrer" href="#">Open AnimeThemes search for this query</a>
+      </p>
       <div id="find-themes-loading" class="loading-indicator" hidden aria-live="polite">
         <span class="loading-spinner" aria-hidden="true"></span>
         <span>Please wait, fetching themes<span class="loading-dots"></span></span>
@@ -143,12 +155,15 @@
 <script>
   (function () {
     const input = document.getElementById("search-query-input");
+    const urlOverrideInput = document.getElementById("animethemes-url-override-input");
     const preview = document.getElementById("request-preview-box");
     const altButtons = document.querySelectorAll(".alt-title-btn");
     const findForm = document.getElementById("find-themes-form");
     const submitBtn = document.getElementById("find-themes-submit-btn");
     const statusEl = document.getElementById("find-themes-status");
     const loadingEl = document.getElementById("find-themes-loading");
+    const manualSearchWrap = document.getElementById("animethemes-manual-search");
+    const manualSearchLink = document.getElementById("animethemes-manual-search-link");
     const candidatesContainer = document.getElementById("apply-candidates-container");
     const emptyState = document.getElementById("apply-empty-state");
     const applyAction = "{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}";
@@ -202,6 +217,10 @@
     }
 
     function renderPreview() {
+      if (urlOverrideInput && urlOverrideInput.value.trim()) {
+        preview.textContent = `Using URL override first:\n${urlOverrideInput.value.trim()}`;
+        return;
+      }
       const variants = buildVariants(input.value);
       if (!variants.length) {
         preview.textContent = "Enter a search query to preview requests.";
@@ -213,6 +232,9 @@
     }
 
     input.addEventListener("input", renderPreview);
+    if (urlOverrideInput) {
+      urlOverrideInput.addEventListener("input", renderPreview);
+    }
     if (altButtons.length) {
       altButtons.forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -377,6 +399,17 @@
       }
     }
 
+    function updateManualSearchLink(query) {
+      if (!manualSearchWrap || !manualSearchLink) return;
+      const q = String(query || "").trim();
+      if (!q) {
+        manualSearchWrap.hidden = true;
+        return;
+      }
+      manualSearchLink.href = `https://animethemes.moe/search?q=${encodeURIComponent(q)}`;
+      manualSearchWrap.hidden = false;
+    }
+
     // Browser console debug output (DevTools)
     if (existingDebugPayload && Object.keys(existingDebugPayload).length) {
       console.groupCollapsed("[Plex ATM] Last AnimeThemes lookup payload");
@@ -415,6 +448,7 @@
         const formData = new FormData(findForm);
         if (submitBtn) submitBtn.disabled = true;
         if (loadingEl) loadingEl.hidden = false;
+        if (manualSearchWrap) manualSearchWrap.hidden = true;
         if (statusEl) {
           statusEl.hidden = true;
           statusEl.textContent = "";
@@ -436,7 +470,13 @@
             statusEl.hidden = false;
             statusEl.textContent = payload.message || "Themes updated.";
           }
-          renderCandidates(payload.candidates || [], Boolean(payload.local_theme_url || localThemeInitially), payload.local_theme_url || localThemeUrl);
+          const candidates = payload.candidates || [];
+          renderCandidates(candidates, Boolean(payload.local_theme_url || localThemeInitially), payload.local_theme_url || localThemeUrl);
+          if (!candidates.length) {
+            updateManualSearchLink(input ? input.value : "");
+          } else if (manualSearchWrap) {
+            manualSearchWrap.hidden = true;
+          }
         } catch (err) {
           if (statusEl) {
             statusEl.hidden = false;

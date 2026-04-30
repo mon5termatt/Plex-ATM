@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import parse_qs, urlparse
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 
@@ -225,6 +226,32 @@ def _normalized_list_state(raw: dict) -> dict:
     if state["view"] not in {"table", "grid"}:
         state["view"] = "table"
     return state
+
+
+def _query_from_animethemes_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    path_parts = [p for p in parsed.path.split("/") if p]
+    if "anime" in path_parts:
+        idx = path_parts.index("anime")
+        if idx + 1 < len(path_parts):
+            slug = path_parts[idx + 1].strip()
+            if slug:
+                return slug.replace("_", " ")
+
+    query_map = parse_qs(parsed.query)
+    name_value = (query_map.get("filter[name]") or [""])[0].strip()
+    if name_value:
+        return name_value
+    slug_value = (query_map.get("filter[slug]") or [""])[0].strip()
+    if slug_value:
+        return slug_value.replace("_", " ")
+    return ""
 
 
 @shows_bp.route("/")
@@ -736,8 +763,10 @@ def show_detail(rating_key: str):
             live_sonarr = {"error": str(exc)}
 
     search_overrides = svc["settings"].get("show_search_overrides", {})
+    animethemes_url_overrides = svc["settings"].get("show_animethemes_url_overrides", {}) or {}
     initial_query = search_overrides.get(rating_key, show_data["title"])
     initial_query = AnimeThemesClient.to_romaji_query(initial_query) or initial_query
+    initial_animethemes_url_override = str(animethemes_url_overrides.get(rating_key, "") or "").strip()
     sonarr_alternate_queries: list[str] = []
     if isinstance(live_sonarr, dict):
         seen = set()
@@ -764,6 +793,7 @@ def show_detail(rating_key: str):
         sonarr_alternate_queries=sonarr_alternate_queries,
         api_debug=api_debug,
         initial_search_query=initial_query,
+        initial_animethemes_url_override=initial_animethemes_url_override,
         back_to_list_params=back_to_list_params,
         back_to_list_url=url_for("shows.list_shows", **back_to_list_params),
         animethemes_base_url=current_app.config["ANIMETHEMES_BASE_URL"].rstrip("/"),
@@ -811,7 +841,16 @@ def find_candidates(rating_key: str):
         flash("Show missing from cache.", "error")
         return redirect(url_for("shows.list_shows"))
     raw_query = request.form.get("search_query", "").strip() or show["title"]
-    search_query = AnimeThemesClient.to_romaji_query(raw_query) or raw_query
+    manual_url_override = request.form.get("animethemes_url_override", "").strip()
+    derived_query_from_url = _query_from_animethemes_url(manual_url_override)
+    search_query_seed = derived_query_from_url or raw_query
+    search_query = AnimeThemesClient.to_romaji_query(search_query_seed) or search_query_seed
+    url_overrides = svc["settings"].get("show_animethemes_url_overrides", {}) or {}
+    if manual_url_override:
+        url_overrides[rating_key] = manual_url_override
+    else:
+        url_overrides.pop(rating_key, None)
+    svc["settings"].set("show_animethemes_url_overrides", url_overrides)
     try:
         _append_debug_log(
             svc["settings"],
