@@ -1,4 +1,5 @@
 import json
+import logging
 import random
 import re
 import time
@@ -10,6 +11,8 @@ from urllib.parse import urlencode
 import requests
 
 from src.db.models import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 class AnimeThemesClient:
@@ -111,6 +114,13 @@ class AnimeThemesClient:
         url = f"{self.base_url}/anime"
         requested_url = f"{url}?{urlencode(params)}"
         response = requests.get(url, params=params, timeout=self.timeout)
+        logger.info(
+            "AnimeThemes request mode=%s query=%s status=%s url=%s",
+            mode,
+            query,
+            response.status_code,
+            response.url,
+        )
         debug: dict[str, Any] = {
             "query": query,
             "mode": mode,
@@ -136,9 +146,17 @@ class AnimeThemesClient:
         payload = response.json()
         debug["response_json"] = payload
         data = self._extract_anime_rows(payload)
+        data = self._hydrate_rows_with_show_endpoint(data)
         debug["anime_count"] = len(data)
         candidates = self._extract_candidates_from_anime_rows(data)
         debug["candidate_count"] = len(candidates)
+        logger.info(
+            "AnimeThemes parsed mode=%s query=%s anime_count=%s candidate_count=%s",
+            mode,
+            query,
+            debug["anime_count"],
+            debug["candidate_count"],
+        )
         return candidates, debug
 
     def _request_candidates_by_direct_slug(self, slug: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -147,6 +165,12 @@ class AnimeThemesClient:
         url = f"{self.base_url}/anime/{slug}"
         requested_url = f"{url}?{urlencode(params)}"
         response = requests.get(url, params=params, timeout=self.timeout)
+        logger.info(
+            "AnimeThemes direct_slug request slug=%s status=%s url=%s",
+            slug,
+            response.status_code,
+            response.url,
+        )
         debug: dict[str, Any] = {
             "query": slug,
             "mode": "direct_slug",
@@ -177,9 +201,16 @@ class AnimeThemesClient:
         payload = response.json()
         debug["response_json"] = payload
         data = self._extract_anime_rows(payload)
+        data = self._hydrate_rows_with_show_endpoint(data)
         debug["anime_count"] = len(data)
         candidates = self._extract_candidates_from_anime_rows(data)
         debug["candidate_count"] = len(candidates)
+        logger.info(
+            "AnimeThemes direct_slug parsed slug=%s anime_count=%s candidate_count=%s",
+            slug,
+            debug["anime_count"],
+            debug["candidate_count"],
+        )
         return candidates, debug
 
     @staticmethod
@@ -230,6 +261,53 @@ class AnimeThemesClient:
                         )
         return candidates
 
+    def _hydrate_rows_with_show_endpoint(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        hydrated: list[dict[str, Any]] = []
+        for row in rows:
+            animethemes = row.get("animethemes", [])
+            if animethemes:
+                hydrated.append(row)
+                continue
+            slug = str(row.get("slug", "")).strip()
+            if not slug:
+                hydrated.append(row)
+                continue
+            logger.info("AnimeThemes hydrate row via show endpoint slug=%s", slug)
+            enriched = self._fetch_anime_show_by_slug(slug)
+            hydrated.append(enriched if enriched else row)
+        return hydrated
+
+    def _fetch_anime_show_by_slug(self, slug: str) -> dict[str, Any] | None:
+        self._gate()
+        params = {"include": self.ANIME_INCLUDE}
+        url = f"{self.base_url}/anime/{slug}"
+        response = requests.get(url, params=params, timeout=self.timeout)
+        logger.info(
+            "AnimeThemes show endpoint slug=%s status=%s url=%s",
+            slug,
+            response.status_code,
+            response.url,
+        )
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", "60"))
+            jitter = random.uniform(0.1, 1.5)
+            state = self._load_rate_state()
+            state["next_allowed_at"] = self._now() + retry_after + jitter
+            self._save_rate_state(state)
+            return None
+        if not response.ok:
+            return None
+        payload = response.json()
+        anime = payload.get("anime")
+        if isinstance(anime, dict):
+            logger.info(
+                "AnimeThemes show endpoint success slug=%s themes=%s",
+                slug,
+                len(anime.get("animethemes", []) or []),
+            )
+            return anime
+        return None
+
     def _search_themes_internal(self, query: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         attempts: list[dict[str, Any]] = []
         for variant in self._build_query_variants(query):
@@ -276,13 +354,19 @@ class AnimeThemesClient:
         if raw_slug:
             variants.append(raw_slug)
 
+        # Handle common honorific spacing where slug may collapse token (e.g. "hime sama" -> "himesama").
+        honorific_joined = re.sub(r"\b([a-z0-9]+)\s+(sama|san|chan|kun)\b", r"\1\2", base)
+        honorific_slug = slugify(honorific_joined)
+        if honorific_slug and honorific_slug not in variants:
+            variants.append(honorific_slug)
+
         # AnimeThemes slugs frequently collapse decimal punctuation (2.5 -> 25).
         decimal_collapsed = re.sub(r"(?<=\d)\.(?=\d)", "", base)
         collapsed_slug = slugify(decimal_collapsed)
         if collapsed_slug and collapsed_slug not in variants:
             variants.append(collapsed_slug)
 
-        return variants[:3]
+        return variants[:5]
 
     def search_themes(self, query: str) -> list[dict[str, Any]]:
         candidates, _ = self._search_themes_internal(query)

@@ -10,6 +10,7 @@
 
 <form method="get" action="{{ url_for('shows.list_shows') }}" class="card filter-row">
   <input type="text" name="q" value="{{ q or '' }}" placeholder="Filter by title or folder path">
+  <input type="hidden" name="view" value="{{ view_mode }}">
   <select name="theme_filter">
     <option value="all" {% if theme_filter == "all" %}selected{% endif %}>All shows</option>
     <option value="has" {% if theme_filter == "has" %}selected{% endif %}>Has theme</option>
@@ -27,19 +28,69 @@
   <p class="card">Configure Plex and select a TV library in Settings first.</p>
 {% elif shows %}
   <p class="muted-text">Showing {{ shows|length }} of {{ total }} shows (page {{ page }} / {{ total_pages }}).</p>
+  <section class="row card view-switch-row">
+    <div class="view-switch">
+      <a class="action-link-btn {% if view_mode != 'table' %}secondary-btn-link{% endif %}" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=1, page_size=page_size, view='table') }}">Table View</a>
+      <a class="action-link-btn {% if view_mode != 'grid' %}secondary-btn-link{% endif %}" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=1, page_size=page_size, view='grid') }}">Grid View</a>
+    </div>
+  </section>
+  {% if view_mode == "grid" %}
+  <section class="show-grid">
+    {% for show in shows %}
+    <article class="card show-grid-card">
+      <a href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}" class="show-grid-poster-link">
+        {% if show.poster_url %}
+          <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-grid" loading="lazy">
+        {% else %}
+          <div class="show-poster-grid placeholder">No Poster</div>
+        {% endif %}
+      </a>
+      <h3 class="show-grid-title">{{ show.title }}</h3>
+      <p class="muted-text show-grid-meta">{{ show.year or "-" }}</p>
+      <div class="show-grid-buttons">
+        {% if show.has_current_theme %}
+          <button
+            type="button"
+            class="secondary-btn play-current-theme-btn"
+            data-theme-url="{{ url_for('shows.play_current_theme', rating_key=show.rating_key) }}"
+            data-show-title="{{ show.title }}"
+          >
+            Play Current Theme
+          </button>
+        {% else %}
+          <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
+            No Theme File
+          </button>
+        {% endif %}
+        <a class="action-link-btn" href="{{ url_for('shows.show_detail', rating_key=show.rating_key, q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size, view=view_mode) }}">
+          Manage Theme
+        </a>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
   <table class="card table">
     <thead>
       <tr>
-        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc')) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
-        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc')) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
-        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='folder', sort_dir=(next_sort_dir if sort_by == 'folder' else 'asc')) }}">Folder{% if sort_by == 'folder' %} ({{ sort_dir }}){% endif %}</a></th>
-        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='has_theme', sort_dir=(next_sort_dir if sort_by == 'has_theme' else 'asc')) }}">Current Theme{% if sort_by == 'has_theme' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th>Poster</th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc'), view=view_mode) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc'), view=view_mode) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='folder', sort_dir=(next_sort_dir if sort_by == 'folder' else 'asc'), view=view_mode) }}">Folder{% if sort_by == 'folder' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='has_theme', sort_dir=(next_sort_dir if sort_by == 'has_theme' else 'asc'), view=view_mode) }}">Current Theme{% if sort_by == 'has_theme' %} ({{ sort_dir }}){% endif %}</a></th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody>
       {% for show in shows %}
       <tr>
+        <td>
+          {% if show.poster_url %}
+            <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-thumb" loading="lazy">
+          {% else %}
+            <span class="muted-text">—</span>
+          {% endif %}
+        </td>
         <td>{{ show.title }}</td>
         <td>{{ show.year or "-" }}</td>
         <td>{{ show.folder_path }}</td>
@@ -54,11 +105,13 @@
               Play Current Theme
             </button>
           {% else %}
-            <span class="muted-text">No theme file</span>
+            <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
+              No Theme File
+            </button>
           {% endif %}
         </td>
         <td>
-          <a class="action-link-btn" href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}">
+          <a class="action-link-btn" href="{{ url_for('shows.show_detail', rating_key=show.rating_key, q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size, view=view_mode) }}">
             Manage Theme
           </a>
         </td>
@@ -66,16 +119,17 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
   <section class="row card">
     <div class="pagination-controls">
       {% if has_prev %}
-        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page-1, page_size=page_size) }}">Previous</a>
+        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page-1, page_size=page_size, view=view_mode) }}">Previous</a>
       {% else %}
         <span class="muted-text">Previous</span>
       {% endif %}
       <span>Page {{ page }} of {{ total_pages }}</span>
       {% if has_next %}
-        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page+1, page_size=page_size) }}">Next</a>
+        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page+1, page_size=page_size, view=view_mode) }}">Next</a>
       {% else %}
         <span class="muted-text">Next</span>
       {% endif %}

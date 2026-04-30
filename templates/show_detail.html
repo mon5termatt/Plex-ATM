@@ -3,14 +3,33 @@
 <div class="shows-layout">
   <section class="shows-main">
     <section class="row">
-      <h2>{{ show.title }}</h2>
-      <a href="{{ url_for('shows.list_shows') }}">Back to shows</a>
+      <div class="show-header">
+        {% if show.poster_url %}
+          <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-large" loading="lazy">
+        {% endif %}
+        <h2>{{ show.title }}</h2>
+      </div>
+      <a class="action-link-btn secondary-btn-link" href="{{ back_to_list_url }}">Back to Shows</a>
     </section>
     <p class="card"><strong>Folder:</strong> {{ show.folder_path }}</p>
 
     <section class="card">
       <h3>Find AnimeThemes Candidates</h3>
-      <form method="post" action="{{ url_for('shows.find_candidates', rating_key=show.rating_key) }}">
+      <form
+        id="find-themes-form"
+        method="post"
+        action="{{ url_for('shows.find_candidates', rating_key=show.rating_key) }}"
+        data-local-theme-initial="{{ '1' if local_theme_available else '0' }}"
+        data-local-theme-url="{{ url_for('shows.play_current_theme', rating_key=show.rating_key) }}"
+        data-show-title="{{ show.title }}"
+      >
+        <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
+        <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
+        <input type="hidden" name="sort_by" value="{{ back_to_list_params.sort_by }}">
+        <input type="hidden" name="sort_dir" value="{{ back_to_list_params.sort_dir }}">
+        <input type="hidden" name="page" value="{{ back_to_list_params.page }}">
+        <input type="hidden" name="page_size" value="{{ back_to_list_params.page_size }}">
+        <input type="hidden" name="view" value="{{ back_to_list_params.view }}">
         <label>Search Query (Romaji)
           <input type="text" id="search-query-input" name="search_query" value="{{ initial_search_query }}">
         </label>
@@ -24,17 +43,25 @@
           </div>
         </div>
         {% endif %}
-        <div class="request-preview">
-          <strong>Request Preview (before submit)</strong>
+        <details class="request-preview">
+          <summary>Request Preview (before submit)</summary>
           <pre id="request-preview-box"></pre>
-        </div>
+        </details>
         <button type="submit">Find Themes</button>
       </form>
+      <p id="find-themes-status" class="muted-text" hidden></p>
     </section>
 
     <section class="card">
       <h3>Upload Custom Theme</h3>
       <form method="post" action="{{ url_for('shows.upload_theme', rating_key=show.rating_key) }}" enctype="multipart/form-data">
+        <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
+        <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
+        <input type="hidden" name="sort_by" value="{{ back_to_list_params.sort_by }}">
+        <input type="hidden" name="sort_dir" value="{{ back_to_list_params.sort_dir }}">
+        <input type="hidden" name="page" value="{{ back_to_list_params.page }}">
+        <input type="hidden" name="page_size" value="{{ back_to_list_params.page_size }}">
+        <input type="hidden" name="view" value="{{ back_to_list_params.view }}">
         <input type="file" name="theme_file" accept=".mp3,.m4a,.flac,.ogg">
         <button type="submit">Upload and Apply</button>
       </form>
@@ -44,8 +71,8 @@
   <aside class="apply-sidebar">
     <section class="card">
       <h3>Apply Candidate</h3>
+      <div id="apply-candidates-container" class="candidate-list">
       {% if local_theme_available or candidates %}
-      <div class="candidate-list">
         {% if local_theme_available %}
         <article class="candidate-item">
           <div class="candidate-meta">
@@ -88,25 +115,59 @@
           {% endif %}
           <form method="post" action="{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}">
             <input type="hidden" name="candidate_id" value="{{ c.id }}">
+            <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
+            <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
+            <input type="hidden" name="sort_by" value="{{ back_to_list_params.sort_by }}">
+            <input type="hidden" name="sort_dir" value="{{ back_to_list_params.sort_dir }}">
+            <input type="hidden" name="page" value="{{ back_to_list_params.page }}">
+            <input type="hidden" name="page_size" value="{{ back_to_list_params.page_size }}">
+            <input type="hidden" name="view" value="{{ back_to_list_params.view }}">
             <button type="submit">Apply This Theme</button>
           </form>
         </article>
         {% endfor %}
       </div>
       {% else %}
-        <p>No candidates saved yet and no local theme found.</p>
+        <p id="apply-empty-state">No candidates saved yet and no local theme found.</p>
       {% endif %}
     </section>
   </aside>
 </div>
 
+<script id="animethemes-debug-json" type="application/json">{{ api_debug.get("animethemes_lookup", {}) | tojson | safe }}</script>
+<script id="back-to-list-state-json" type="application/json">{{ back_to_list_params | tojson | safe }}</script>
 <script>
   (function () {
     const input = document.getElementById("search-query-input");
     const preview = document.getElementById("request-preview-box");
     const altButtons = document.querySelectorAll(".alt-title-btn");
-    const audioPlayers = document.querySelectorAll("[data-audio-player]");
+    const findForm = document.getElementById("find-themes-form");
+    const statusEl = document.getElementById("find-themes-status");
+    const candidatesContainer = document.getElementById("apply-candidates-container");
+    const emptyState = document.getElementById("apply-empty-state");
+    const applyAction = "{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}";
+    let listState = {};
+    const listStateNode = document.getElementById("back-to-list-state-json");
+    if (listStateNode && listStateNode.textContent) {
+      try {
+        listState = JSON.parse(listStateNode.textContent);
+      } catch (err) {
+        console.error("[Plex ATM] Failed to parse back-to-list state JSON.", err);
+      }
+    }
+    const localThemeInitially = findForm ? findForm.dataset.localThemeInitial === "1" : false;
+    const localThemeUrl = findForm ? (findForm.dataset.localThemeUrl || "") : "";
+    const showTitle = findForm ? (findForm.dataset.showTitle || "") : "";
     const base = "{{ animethemes_base_url }}/anime";
+    let existingDebugPayload = {};
+    const debugJsonNode = document.getElementById("animethemes-debug-json");
+    if (debugJsonNode && debugJsonNode.textContent) {
+      try {
+        existingDebugPayload = JSON.parse(debugJsonNode.textContent);
+      } catch (err) {
+        console.error("[Plex ATM] Failed to parse debug payload JSON.", err);
+      }
+    }
 
     function uniquePush(arr, value) {
       if (value && !arr.includes(value)) arr.push(value);
@@ -165,6 +226,7 @@
     }
 
     function stopOtherPlayers(currentAudio) {
+      const audioPlayers = document.querySelectorAll("[data-audio-player]");
       audioPlayers.forEach((player) => {
         const audio = player.querySelector("[data-audio-element]");
         const playBtn = player.querySelector("[data-audio-play]");
@@ -175,7 +237,11 @@
       });
     }
 
-    audioPlayers.forEach((player) => {
+    function initAudioPlayers(scope) {
+      const players = (scope || document).querySelectorAll("[data-audio-player]");
+      players.forEach((player) => {
+        if (player.dataset.audioInit === "1") return;
+        player.dataset.audioInit = "1";
       const audio = player.querySelector("[data-audio-element]");
       const playBtn = player.querySelector("[data-audio-play]");
       const progress = player.querySelector("[data-audio-progress]");
@@ -220,8 +286,157 @@
           audio.currentTime = (Number(progress.value) / 100) * audio.duration;
         }
       });
-    });
+      });
+    }
 
+    function esc(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function buildListStateInputs() {
+      return `
+        <input type="hidden" name="q" value="${esc(listState.q)}">
+        <input type="hidden" name="theme_filter" value="${esc(listState.theme_filter)}">
+        <input type="hidden" name="sort_by" value="${esc(listState.sort_by)}">
+        <input type="hidden" name="sort_dir" value="${esc(listState.sort_dir)}">
+        <input type="hidden" name="page" value="${esc(listState.page)}">
+        <input type="hidden" name="page_size" value="${esc(listState.page_size)}">
+        <input type="hidden" name="view" value="${esc(listState.view)}">
+      `;
+    }
+
+    function renderCandidates(items, includeLocalTheme, localUrl) {
+      const blocks = [];
+      if (includeLocalTheme && localUrl) {
+        blocks.push(`
+          <article class="candidate-item">
+            <div class="candidate-meta">
+              <strong>Current Local Theme</strong>
+              <small>Source: local</small>
+            </div>
+            <div class="audio-player" data-audio-player>
+              <audio preload="metadata" class="candidate-audio" data-audio-element>
+                <source src="${esc(localUrl)}">
+                Your browser does not support audio preview.
+              </audio>
+              <div class="audio-controls">
+                <button type="button" class="audio-play-btn" data-audio-play>Play</button>
+                <input type="range" min="0" max="100" value="0" class="audio-progress" data-audio-progress>
+                <span class="audio-time" data-audio-time>0:00 / 0:00</span>
+              </div>
+            </div>
+          </article>
+        `);
+      }
+
+      items.forEach((c) => {
+        blocks.push(`
+          <article class="candidate-item">
+            <div class="candidate-meta">
+              <strong>${esc(c.label)}</strong>
+              <small>Source: ${esc(c.source)}</small>
+            </div>
+            ${c.audio_url ? `
+            <div class="audio-player" data-audio-player>
+              <audio preload="metadata" class="candidate-audio" data-audio-element>
+                <source src="${esc(c.audio_url)}">
+                Your browser does not support audio preview.
+              </audio>
+              <div class="audio-controls">
+                <button type="button" class="audio-play-btn" data-audio-play>Play</button>
+                <input type="range" min="0" max="100" value="0" class="audio-progress" data-audio-progress>
+                <span class="audio-time" data-audio-time>0:00 / 0:00</span>
+              </div>
+            </div>` : `<p>No preview URL available for this candidate.</p>`}
+            <form method="post" action="${esc(applyAction)}">
+              <input type="hidden" name="candidate_id" value="${esc(c.id)}">
+              ${buildListStateInputs()}
+              <button type="submit">Apply This Theme</button>
+            </form>
+          </article>
+        `);
+      });
+
+      if (candidatesContainer) {
+        candidatesContainer.innerHTML = blocks.join("");
+        initAudioPlayers(candidatesContainer);
+      }
+      if (emptyState) {
+        emptyState.hidden = blocks.length > 0;
+      }
+    }
+
+    // Browser console debug output (DevTools)
+    if (existingDebugPayload && Object.keys(existingDebugPayload).length) {
+      console.groupCollapsed("[Plex ATM] Last AnimeThemes lookup payload");
+      console.log(existingDebugPayload);
+      if (Array.isArray(existingDebugPayload.attempts)) {
+        console.table(
+          existingDebugPayload.attempts.map((a, i) => ({
+            attempt: i + 1,
+            mode: a.mode,
+            query: a.attempt_query || a.query,
+            status: a.status_code,
+            anime_count: a.anime_count,
+            candidate_count: a.candidate_count,
+            remaining: a.rate_limit_remaining,
+            url: a.url,
+          }))
+        );
+      }
+      console.groupEnd();
+    } else {
+      console.info("[Plex ATM] No saved AnimeThemes debug payload for this show yet.");
+    }
+
+    if (findForm) {
+      findForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const variants = buildVariants(input.value);
+        const requestUrls = variants.map((q) => buildUrl(q));
+        console.group("[Plex ATM] Find Themes submit");
+        console.log("show:", showTitle);
+        console.log("query:", input.value);
+        console.log("attempt_variants:", variants);
+        console.log("request_urls:", requestUrls);
+        console.groupEnd();
+
+        const formData = new FormData(findForm);
+        if (statusEl) {
+          statusEl.hidden = false;
+          statusEl.textContent = "Finding themes...";
+        }
+        try {
+          const response = await fetch(findForm.action, {
+            method: "POST",
+            body: formData,
+            headers: {
+              "X-Requested-With": "fetch",
+              "Accept": "application/json",
+            },
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.message || "Theme lookup failed.");
+          }
+          if (statusEl) {
+            statusEl.textContent = payload.message || "Themes updated.";
+          }
+          renderCandidates(payload.candidates || [], Boolean(payload.local_theme_url || localThemeInitially), payload.local_theme_url || localThemeUrl);
+        } catch (err) {
+          if (statusEl) {
+            statusEl.textContent = `Error: ${err.message || err}`;
+          }
+        }
+      });
+    }
+
+    initAudioPlayers(document);
     renderPreview();
   })();
 </script>

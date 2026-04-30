@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import os
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 
 from src.db.models import get_conn
 from src.services.animethemes_client import AnimeThemesClient
@@ -173,6 +173,35 @@ def _set_show_api_debug(settings_service: SettingsService, rating_key: str, key:
     settings_service.set("show_api_debug", payloads)
 
 
+def _build_plex_poster_url(svc: dict, rating_key: str) -> str:
+    plex_url = str(svc["settings"].get("plex_url", "") or "").strip().rstrip("/")
+    plex_token = str(svc["settings"].get("plex_token", "") or "").strip()
+    if not plex_url or not plex_token or not rating_key:
+        return ""
+    return f"{plex_url}/library/metadata/{rating_key}/thumb?X-Plex-Token={plex_token}"
+
+
+def _normalized_list_state(raw: dict) -> dict:
+    state = {
+        "q": str(raw.get("q", "") or "").strip(),
+        "theme_filter": str(raw.get("theme_filter", "all") or "").strip().lower() or "all",
+        "sort_by": str(raw.get("sort_by", "title") or "").strip().lower() or "title",
+        "sort_dir": str(raw.get("sort_dir", "asc") or "").strip().lower() or "asc",
+        "page": str(raw.get("page", "1") or "").strip() or "1",
+        "page_size": str(raw.get("page_size", "50") or "").strip() or "50",
+        "view": str(raw.get("view", "table") or "").strip().lower() or "table",
+    }
+    if state["theme_filter"] not in {"all", "has", "none"}:
+        state["theme_filter"] = "all"
+    if state["sort_by"] not in {"title", "year", "folder", "has_theme"}:
+        state["sort_by"] = "title"
+    if state["sort_dir"] not in {"asc", "desc"}:
+        state["sort_dir"] = "asc"
+    if state["view"] not in {"table", "grid"}:
+        state["view"] = "table"
+    return state
+
+
 @shows_bp.route("/")
 def home():
     return redirect(url_for("shows.list_shows"))
@@ -192,6 +221,9 @@ def list_shows():
         sort_by = "title"
     if sort_dir not in {"asc", "desc"}:
         sort_dir = "asc"
+    view_mode = request.args.get("view", "table").strip().lower()
+    if view_mode not in {"table", "grid"}:
+        view_mode = "table"
     try:
         page = int(request.args.get("page", "1"))
     except ValueError:
@@ -216,6 +248,7 @@ def list_shows():
         show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
         current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
         show["has_current_theme"] = bool(current_theme_path)
+        show["poster_url"] = _build_plex_poster_url(svc, show["rating_key"])
         if theme_filter == "has" and not show["has_current_theme"]:
             continue
         if theme_filter == "none" and show["has_current_theme"]:
@@ -247,6 +280,7 @@ def list_shows():
         theme_filter=theme_filter,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        view_mode=view_mode,
         page=page,
         page_size=page_size,
         total=total,
@@ -335,6 +369,7 @@ def show_detail(rating_key: str):
         show_data["folder_path"],
         trusted_roots=trusted_roots,
     )
+    show_data["poster_url"] = _build_plex_poster_url(svc, show_data["rating_key"])
 
     live_plex = None
     plex_url = svc["settings"].get("plex_url", "")
@@ -391,6 +426,7 @@ def show_detail(rating_key: str):
     api_debug = svc["settings"].get("show_api_debug", {}).get(rating_key, {})
     local_theme_path = _find_theme_file_in_show_folder(show_data["folder_path"])
     local_theme_available = bool(local_theme_path)
+    back_to_list_params = _normalized_list_state(request.args)
     return render_template(
         "show_detail.html",
         show=show_data,
@@ -402,6 +438,8 @@ def show_detail(rating_key: str):
         sonarr_alternate_queries=sonarr_alternate_queries,
         api_debug=api_debug,
         initial_search_query=initial_query,
+        back_to_list_params=back_to_list_params,
+        back_to_list_url=url_for("shows.list_shows", **back_to_list_params),
         animethemes_base_url=current_app.config["ANIMETHEMES_BASE_URL"].rstrip("/"),
         debug_logs=debug_logs,
     )
@@ -442,6 +480,8 @@ def find_candidates(rating_key: str):
             (rating_key,),
         ).fetchone()
     if not show:
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": False, "message": "Show missing from cache."}), 404
         flash("Show missing from cache.", "error")
         return redirect(url_for("shows.list_shows"))
     raw_query = request.form.get("search_query", "").strip() or show["title"]
@@ -524,11 +564,39 @@ def find_candidates(rating_key: str):
                 "AnimeThemes response preview "
                 f"attempt={idx} title='{show['title']}' body={attempt.get('response_preview', '').replace(chr(10), ' ')}",
             )
-        flash(f"Saved {len(candidates)} AnimeThemes candidates.", "success")
+        message = f"Saved {len(candidates)} AnimeThemes candidates."
+        if request.headers.get("X-Requested-With") == "fetch":
+            with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+                rows = conn.execute(
+                    "SELECT id, source, label, audio_url FROM theme_candidates WHERE show_rating_key = ? ORDER BY id DESC",
+                    (rating_key,),
+                ).fetchall()
+                show_row = conn.execute(
+                    "SELECT folder_path FROM plex_shows_cache WHERE rating_key = ?",
+                    (rating_key,),
+                ).fetchone()
+            local_theme_url = ""
+            if show_row:
+                resolved_folder = _resolve_existing_show_folder_path(svc, show_row["folder_path"])
+                if _find_theme_file_in_show_folder(resolved_folder):
+                    local_theme_url = url_for("shows.play_current_theme", rating_key=rating_key)
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": message,
+                    "candidates": [dict(r) for r in rows],
+                    "local_theme_url": local_theme_url,
+                    "show_title": show["title"],
+                }
+            )
+        flash(message, "success")
     except Exception as exc:
         _append_debug_log(svc["settings"], f"AnimeThemes lookup failed for '{show['title']}' query='{search_query}': {exc}")
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": False, "message": f"Theme lookup failed: {exc}"}), 500
         flash(f"Theme lookup failed: {exc}", "error")
-    return redirect(url_for("shows.show_detail", rating_key=rating_key))
+    list_state = _normalized_list_state(request.form)
+    return redirect(url_for("shows.show_detail", rating_key=rating_key, **list_state))
 
 
 @shows_bp.route("/shows/<rating_key>/apply", methods=["POST"])
@@ -546,16 +614,16 @@ def apply_candidate(rating_key: str):
         ).fetchone()
     if not show or not candidate:
         flash("Candidate or show not found.", "error")
-        return redirect(url_for("shows.show_detail", rating_key=rating_key))
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
     trusted_paths = _runtime_trusted_paths(svc)
     show_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
     target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
-        return redirect(url_for("shows.show_detail", rating_key=rating_key))
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
     ok, message = svc["apply"].install_from_url(show["rating_key"], target_folder, candidate["audio_url"])
     flash(f"Theme applied: {message}" if ok else f"Apply failed: {message}", "success" if ok else "error")
-    return redirect(url_for("shows.show_detail", rating_key=rating_key))
+    return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 
 
 @shows_bp.route("/shows/<rating_key>/upload", methods=["POST"])
@@ -564,10 +632,10 @@ def upload_theme(rating_key: str):
     file = request.files.get("theme_file")
     if not file or not file.filename:
         flash("Choose an audio file first.", "error")
-        return redirect(url_for("shows.show_detail", rating_key=rating_key))
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
     if not file.filename.lower().endswith((".mp3", ".m4a", ".flac", ".ogg")):
         flash("Only audio file uploads are supported.", "error")
-        return redirect(url_for("shows.show_detail", rating_key=rating_key))
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 
     with get_conn(current_app.config["DATABASE_PATH"]) as conn:
         show = conn.execute(
@@ -583,7 +651,7 @@ def upload_theme(rating_key: str):
     target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
-        return redirect(url_for("shows.show_detail", rating_key=rating_key))
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 
     ok, message = svc["apply"].install_from_upload(show["rating_key"], target_folder, file.read())
     if ok:
@@ -601,4 +669,4 @@ def upload_theme(rating_key: str):
             )
             conn.commit()
     flash(f"Upload applied: {message}" if ok else f"Upload failed: {message}", "success" if ok else "error")
-    return redirect(url_for("shows.show_detail", rating_key=rating_key))
+    return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
