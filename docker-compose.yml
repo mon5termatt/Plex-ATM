@@ -13,6 +13,8 @@ services:
       APP_DATABASE_PATH: "/app/data/app.db"
       APP_UPLOAD_DIR: "/app/data/uploads"
       APP_LOG_DIR: "/app/data/logs"
+      # Optional path remaps for incoming Plex/Sonarr paths:
+      # APP_PATH_MAPPINGS: "/plex/ANIME=/media/anime;/plex/TV=/media/tv"
     volumes:
       - ./data:/app/data
       # Map your media library roots here.

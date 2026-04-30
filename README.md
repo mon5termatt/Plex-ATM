@@ -70,7 +70,7 @@ Open: `http://localhost:5000`
 
 ### Important: Path Mapping
 
-If Sonarr/Plex paths are container-style (for example `/tv/...`), mount your host media folders to matching container paths in `docker-compose.yml`.
+Preferred: use container-native library paths like `/tv/...` and `/anime/...` in Plex/Sonarr, and mount host media folders to those exact paths in `docker-compose.yml`.
 
 Example:
 
@@ -78,7 +78,14 @@ Example:
 volumes:
   - ./data:/app/data
   - "D:/TV:/tv"
-  - "D:/Anime:/media/anime"
+  - "D:/Anime:/anime"
+```
+
+Only if needed (path mismatch): if source paths use a different prefix than your container mount (for example `/plex/ANIME/...`), set:
+
+```yaml
+environment:
+  APP_PATH_MAPPINGS: "/plex/ANIME=/media/anime;/plex/TV=/media/tv"
 ```
 
 ## AnimeThemes API Notes

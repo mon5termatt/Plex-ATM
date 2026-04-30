@@ -12,10 +12,38 @@ class ThemeApplyService:
         self.database_path = database_path
 
     @staticmethod
+    def _apply_path_mappings(path: str) -> str:
+        """
+        Apply optional prefix remaps from APP_PATH_MAPPINGS env var.
+        Format: "/from1=/to1;/from2=/to2"
+        Example: "/plex/ANIME=/media/anime;/tv=/media/tv"
+        """
+        mapping_spec = os.environ.get("APP_PATH_MAPPINGS", "").strip()
+        if not mapping_spec:
+            return path
+
+        mapped = path
+        for rule in mapping_spec.split(";"):
+            rule = rule.strip()
+            if not rule or "=" not in rule:
+                continue
+            src, dst = rule.split("=", 1)
+            src = src.strip().rstrip("/")
+            dst = dst.strip().rstrip("/")
+            if not src or not dst:
+                continue
+            if mapped == src or mapped.startswith(src + "/"):
+                mapped = dst + mapped[len(src):]
+                break
+        return mapped
+
+    @staticmethod
     def _resolve_target_folder(folder_path: str) -> str:
         raw = (folder_path or "").strip()
         if not raw:
             raise ValueError("Target folder path is empty.")
+
+        raw = ThemeApplyService._apply_path_mappings(raw)
 
         # Common mismatch: Sonarr returns Linux/container path (/tv/...) while app runs on Windows.
         if os.name == "nt" and raw.startswith("/"):

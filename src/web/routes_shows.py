@@ -44,6 +44,9 @@ def _is_within_trusted_paths(folder_path: str, trusted_paths: list[str]) -> bool
 
 def _runtime_trusted_paths(svc: dict) -> list[str]:
     paths = list(svc["settings"].get("trusted_library_paths", []) or [])
+    library_root_override = str(svc["settings"].get("library_root_override", "") or "").strip()
+    if library_root_override:
+        paths.append(library_root_override)
     sonarr_url = svc["settings"].get("sonarr_url", "")
     sonarr_api_key = svc["settings"].get("sonarr_api_key", "")
     if sonarr_url and sonarr_api_key:
@@ -64,6 +67,20 @@ def _runtime_trusted_paths(svc: dict) -> list[str]:
             unique.append(p)
             seen.add(key)
     return unique
+
+
+def _resolve_write_folder(svc: dict, folder_path: str) -> str:
+    """
+    If library_root_override is configured, write under that root using the show's leaf folder.
+    Example: folder_path=/tv/Show Name and override=/media/anime -> /media/anime/Show Name
+    """
+    override_root = str(svc["settings"].get("library_root_override", "") or "").strip()
+    if not override_root:
+        return folder_path
+    leaf = os.path.basename(os.path.normpath(folder_path))
+    if not leaf:
+        return folder_path
+    return os.path.join(override_root, leaf)
 
 
 def _append_debug_log(settings_service: SettingsService, message: str) -> None:
@@ -349,10 +366,11 @@ def apply_candidate(rating_key: str):
         flash("Candidate or show not found.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
     trusted_paths = _runtime_trusted_paths(svc)
-    if not _is_within_trusted_paths(show["folder_path"], trusted_paths):
+    target_folder = _resolve_write_folder(svc, show["folder_path"])
+    if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
-    ok, message = svc["apply"].install_from_url(show["rating_key"], show["folder_path"], candidate["audio_url"])
+    ok, message = svc["apply"].install_from_url(show["rating_key"], target_folder, candidate["audio_url"])
     flash(f"Theme applied: {message}" if ok else f"Apply failed: {message}", "success" if ok else "error")
     return redirect(url_for("shows.show_detail", rating_key=rating_key))
 
@@ -378,11 +396,12 @@ def upload_theme(rating_key: str):
             return redirect(url_for("shows.list_shows"))
 
     trusted_paths = _runtime_trusted_paths(svc)
-    if not _is_within_trusted_paths(show["folder_path"], trusted_paths):
+    target_folder = _resolve_write_folder(svc, show["folder_path"])
+    if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
 
-    ok, message = svc["apply"].install_from_upload(show["rating_key"], show["folder_path"], file.read())
+    ok, message = svc["apply"].install_from_upload(show["rating_key"], target_folder, file.read())
     if ok:
         with get_conn(current_app.config["DATABASE_PATH"]) as conn:
             conn.execute(

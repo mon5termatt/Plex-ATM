@@ -18,12 +18,14 @@ def settings():
         library_key = request.form.get("library_key", "").strip()
         sonarr_url = request.form.get("sonarr_url", "").strip()
         sonarr_api_key = request.form.get("sonarr_api_key", "").strip()
+        library_root_override = request.form.get("library_root_override", "").strip()
 
         service.set("plex_url", plex_url)
         service.set("plex_token", plex_token)
         service.set("library_key", library_key)
         service.set("sonarr_url", sonarr_url)
         service.set("sonarr_api_key", sonarr_api_key)
+        service.set("library_root_override", library_root_override)
         if plex_url and plex_token and library_key:
             try:
                 sections = PlexClient(plex_url, plex_token).list_sections()
@@ -38,6 +40,7 @@ def settings():
     plex_token = service.get("plex_token", "")
     sonarr_url = service.get("sonarr_url", "")
     sonarr_api_key = service.get("sonarr_api_key", "")
+    library_root_override = service.get("library_root_override", "")
     selected_library = service.get("library_key", "")
 
     sections = []
@@ -65,5 +68,6 @@ def settings():
         plex_ok=plex_ok,
         sonarr_url=sonarr_url,
         sonarr_api_key=sonarr_api_key,
+        library_root_override=library_root_override,
         sonarr_status=sonarr_status,
     )
