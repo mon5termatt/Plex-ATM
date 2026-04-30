@@ -44,8 +44,27 @@
   <aside class="apply-sidebar">
     <section class="card">
       <h3>Apply Candidate</h3>
-      {% if candidates %}
+      {% if local_theme_available or candidates %}
       <div class="candidate-list">
+        {% if local_theme_available %}
+        <article class="candidate-item">
+          <div class="candidate-meta">
+            <strong>Current Local Theme</strong>
+            <small>Source: local</small>
+          </div>
+          <div class="audio-player" data-audio-player>
+            <audio preload="metadata" class="candidate-audio" data-audio-element>
+              <source src="{{ url_for('shows.play_current_theme', rating_key=show.rating_key) }}">
+              Your browser does not support audio preview.
+            </audio>
+            <div class="audio-controls">
+              <button type="button" class="audio-play-btn" data-audio-play>Play</button>
+              <input type="range" min="0" max="100" value="0" class="audio-progress" data-audio-progress>
+              <span class="audio-time" data-audio-time>0:00 / 0:00</span>
+            </div>
+          </div>
+        </article>
+        {% endif %}
         {% for c in candidates %}
         <article class="candidate-item">
           <div class="candidate-meta">
@@ -75,7 +94,7 @@
         {% endfor %}
       </div>
       {% else %}
-        <p>No candidates saved yet.</p>
+        <p>No candidates saved yet and no local theme found.</p>
       {% endif %}
     </section>
   </aside>

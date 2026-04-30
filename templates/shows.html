@@ -16,6 +16,7 @@
         <th>Title</th>
         <th>Year</th>
         <th>Folder</th>
+        <th>Current Theme</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -25,7 +26,25 @@
         <td>{{ show.title }}</td>
         <td>{{ show.year or "-" }}</td>
         <td>{{ show.folder_path }}</td>
-        <td><a href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}">Manage Theme</a></td>
+        <td>
+          {% if show.has_current_theme %}
+            <button
+              type="button"
+              class="secondary-btn play-current-theme-btn"
+              data-theme-url="{{ url_for('shows.play_current_theme', rating_key=show.rating_key) }}"
+              data-show-title="{{ show.title }}"
+            >
+              Play Current Theme
+            </button>
+          {% else %}
+            <span class="muted-text">No theme file</span>
+          {% endif %}
+        </td>
+        <td>
+          <a class="action-link-btn" href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}">
+            Manage Theme
+          </a>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -33,4 +52,100 @@
 {% else %}
   <p class="card">No cached shows yet. Click Rescan Library to populate cache.</p>
 {% endif %}
+
+<div id="floating-theme-player" class="floating-theme-player" hidden>
+  <div class="floating-theme-meta">
+    <strong id="floating-theme-title">Current Theme</strong>
+    <button type="button" id="floating-theme-close" class="floating-theme-close">Close</button>
+  </div>
+  <div class="audio-player floating-audio-player">
+    <audio id="floating-theme-audio" preload="metadata" class="candidate-audio"></audio>
+    <div class="audio-controls">
+      <button type="button" id="floating-theme-play" class="audio-play-btn">Play</button>
+      <input type="range" min="0" max="100" value="0" class="audio-progress" id="floating-theme-progress">
+      <span class="audio-time" id="floating-theme-time">0:00 / 0:00</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const playerWrap = document.getElementById("floating-theme-player");
+    const audio = document.getElementById("floating-theme-audio");
+    const title = document.getElementById("floating-theme-title");
+    const closeBtn = document.getElementById("floating-theme-close");
+    const playBtn = document.getElementById("floating-theme-play");
+    const progress = document.getElementById("floating-theme-progress");
+    const time = document.getElementById("floating-theme-time");
+    const buttons = document.querySelectorAll(".play-current-theme-btn");
+
+    if (!playerWrap || !audio || !title || !closeBtn || !playBtn || !progress || !time || !buttons.length) return;
+
+    function formatTime(seconds) {
+      if (!isFinite(seconds) || seconds < 0) return "0:00";
+      const minutes = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${minutes}:${secs.toString().padStart(2, "0")}`;
+    }
+
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", function () {
+        const url = btn.getAttribute("data-theme-url");
+        const showTitle = btn.getAttribute("data-show-title") || "Current Theme";
+        if (!url) return;
+        title.textContent = `${showTitle} - Current Theme`;
+        audio.src = url;
+        playerWrap.hidden = false;
+        audio.play();
+      });
+    });
+
+    playBtn.addEventListener("click", function () {
+      if (audio.paused) {
+        audio.play();
+      } else {
+        audio.pause();
+      }
+    });
+
+    audio.addEventListener("play", function () {
+      playBtn.textContent = "Pause";
+    });
+
+    audio.addEventListener("pause", function () {
+      playBtn.textContent = "Play";
+    });
+
+    audio.addEventListener("ended", function () {
+      playBtn.textContent = "Play";
+    });
+
+    audio.addEventListener("loadedmetadata", function () {
+      time.textContent = `${formatTime(0)} / ${formatTime(audio.duration)}`;
+    });
+
+    audio.addEventListener("timeupdate", function () {
+      if (audio.duration > 0) {
+        progress.value = String((audio.currentTime / audio.duration) * 100);
+      }
+      time.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+    });
+
+    progress.addEventListener("input", function () {
+      if (audio.duration > 0) {
+        audio.currentTime = (Number(progress.value) / 100) * audio.duration;
+      }
+    });
+
+    closeBtn.addEventListener("click", function () {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      playBtn.textContent = "Play";
+      progress.value = "0";
+      time.textContent = "0:00 / 0:00";
+      playerWrap.hidden = true;
+    });
+  })();
+</script>
 {% endblock %}

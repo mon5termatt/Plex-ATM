@@ -76,6 +76,11 @@ button {
   font-weight: 600;
 }
 
+.secondary-btn {
+  background: #2a3142;
+  border-color: #3c4357;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -85,6 +90,28 @@ button {
   padding: 10px;
   border-bottom: 1px solid #30364a;
   text-align: left;
+  vertical-align: middle;
+}
+
+.muted-text {
+  color: #9ba7c2;
+}
+
+.play-current-theme-btn {
+  width: auto;
+  margin: 0;
+  padding: 7px 10px;
+}
+
+.action-link-btn {
+  display: inline-block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #2d8cff;
+  background: #2d8cff;
+  color: #f2f4f8;
+  text-decoration: none;
+  font-weight: 600;
 }
 
 .flash-list {
@@ -281,5 +308,43 @@ body.show-debug .debug-panel {
   word-break: break-word;
   max-height: 380px;
   overflow: auto;
+}
+
+.floating-theme-player {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  width: min(860px, calc(100% - 20px));
+  background: #1a1f2b;
+  border: 1px solid #2f3750;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+}
+
+.floating-theme-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.floating-theme-close {
+  width: auto;
+  margin: 0;
+  padding: 5px 10px;
+  background: #2a3142;
+  border-color: #3c4357;
+}
+
+.floating-theme-audio {
+  width: 100%;
+  margin: 0;
+}
+
+.floating-audio-player {
+  margin-bottom: 0;
 }
 

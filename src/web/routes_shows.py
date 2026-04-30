@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import os
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
 
 from src.db.models import get_conn
 from src.services.animethemes_client import AnimeThemesClient
@@ -83,6 +83,20 @@ def _resolve_write_folder(svc: dict, folder_path: str) -> str:
     return os.path.join(override_root, leaf)
 
 
+def _find_theme_file_in_show_folder(folder_path: str) -> str:
+    """
+    Check only inside the show's own folder for current theme files.
+    """
+    base = str(folder_path or "").strip()
+    if not base:
+        return ""
+    for filename in ("theme.mp3", "theme.ogg", "theme.m4a", "theme.flac"):
+        candidate = os.path.join(base, filename)
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
 def _append_debug_log(settings_service: SettingsService, message: str) -> None:
     logs = settings_service.get("debug_logs", [])
     logs.append(f"{datetime.now(timezone.utc).isoformat()} | {message}")
@@ -107,6 +121,13 @@ def list_shows():
     svc = _services()
     library_key = svc["settings"].get("library_key", "")
     shows = svc["cache"].get_cached_shows(library_key) if library_key else []
+    enriched = []
+    for row in shows:
+        show = dict(row)
+        current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
+        show["has_current_theme"] = bool(current_theme_path)
+        enriched.append(show)
+    shows = enriched
     return render_template("shows.html", shows=shows, library_key=library_key)
 
 
@@ -236,10 +257,13 @@ def show_detail(rating_key: str):
                 break
     debug_logs = []
     api_debug = svc["settings"].get("show_api_debug", {}).get(rating_key, {})
+    local_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
+    local_theme_available = bool(local_theme_path)
     return render_template(
         "show_detail.html",
         show=dict(show),
         candidates=[dict(c) for c in candidates],
+        local_theme_available=local_theme_available,
         installs=[dict(i) for i in installs],
         live_plex=live_plex,
         live_sonarr=live_sonarr,
@@ -249,6 +273,32 @@ def show_detail(rating_key: str):
         animethemes_base_url=current_app.config["ANIMETHEMES_BASE_URL"].rstrip("/"),
         debug_logs=debug_logs,
     )
+
+
+@shows_bp.route("/shows/<rating_key>/current-theme")
+def play_current_theme(rating_key: str):
+    svc = _services()
+    with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+        show = conn.execute(
+            "SELECT rating_key, folder_path FROM plex_shows_cache WHERE rating_key = ?",
+            (rating_key,),
+        ).fetchone()
+    if not show:
+        flash("Show not found.", "error")
+        return redirect(url_for("shows.list_shows"))
+
+    target_folder = show["folder_path"]
+    trusted_paths = _runtime_trusted_paths(svc)
+    if not _is_within_trusted_paths(target_folder, trusted_paths):
+        flash("Current theme path is outside trusted library paths.", "error")
+        return redirect(url_for("shows.list_shows"))
+
+    theme_path = _find_theme_file_in_show_folder(target_folder)
+    if theme_path:
+        return send_file(theme_path)
+
+    flash("No current theme file found for this show.", "error")
+    return redirect(url_for("shows.list_shows"))
 
 
 @shows_bp.route("/shows/<rating_key>/find", methods=["POST"])

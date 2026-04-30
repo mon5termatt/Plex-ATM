@@ -2,12 +2,16 @@
 {% block content %}
 <h2>Settings</h2>
 <form method="post" class="card form-grid">
+  <input type="hidden" name="action" id="settings-action-input" value="save_settings">
   <label>Plex URL
     <input name="plex_url" value="{{ plex_url }}" placeholder="http://127.0.0.1:32400">
   </label>
   <label>Plex Token
     <input name="plex_token" value="{{ plex_token }}" placeholder="X-Plex-Token">
   </label>
+  <button type="submit" class="secondary-btn" onclick="document.getElementById('settings-action-input').value='scan_libraries'">
+    Scan Libraries
+  </button>
   <label>TV Library
     <select name="library_key">
       <option value="">-- Select show library --</option>
@@ -27,7 +31,7 @@
   <label>Library Root Override (optional, usually leave blank)
     <input name="library_root_override" value="{{ library_root_override }}" placeholder="Prefer /tv or /anime paths from Plex/Sonarr">
   </label>
-  <button type="submit">Save Settings</button>
+  <button type="submit" onclick="document.getElementById('settings-action-input').value='save_settings'">Save Settings</button>
 </form>
 
 <section class="card">

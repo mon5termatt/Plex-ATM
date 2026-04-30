@@ -15,9 +15,9 @@ Example on Windows:
 
 ```yaml
 volumes:
-  - ./data:/app/data
-  - "D:/TV:/media/tv"
-  - "D:/Anime:/media/anime"
+  - plex_atm_data:/app/data
+  - "D:/TV:/tv"
+  - "D:/Anime:/anime"
 ```
 
 ## 3) Build and start locally on server
@@ -29,6 +29,8 @@ docker compose up -d --build
 Open: `http://localhost:5000`
 
 Note: the container includes `ffmpeg` and will re-encode applied themes to MP3 128kbps.
+
+`/app/data` stores app settings + SQLite DB and now persists in the named Docker volume `plex_atm_data`.
 
 ## 4) Set Plex/Sonarr paths to container-visible paths
 

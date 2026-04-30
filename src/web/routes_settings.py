@@ -11,8 +11,10 @@ settings_bp = Blueprint("settings", __name__)
 @settings_bp.route("/settings", methods=["GET", "POST"])
 def settings():
     service = SettingsService(current_app.config["DATABASE_PATH"])
+    sections_cache_key = "plex_sections_cache"
 
     if request.method == "POST":
+        action = request.form.get("action", "save_settings").strip()
         plex_url = request.form.get("plex_url", "").strip()
         plex_token = request.form.get("plex_token", "").strip()
         library_key = request.form.get("library_key", "").strip()
@@ -22,17 +24,26 @@ def settings():
 
         service.set("plex_url", plex_url)
         service.set("plex_token", plex_token)
+        if action == "scan_libraries":
+            if not (plex_url and plex_token):
+                flash("Enter Plex URL and token first.", "error")
+                return redirect(url_for("settings.settings"))
+            try:
+                sections = [s for s in PlexClient(plex_url, plex_token).list_sections() if s.get("type") == "show"]
+                service.set(sections_cache_key, sections)
+                flash(f"Library scan complete. Found {len(sections)} TV libraries.", "success")
+            except Exception as exc:
+                flash(f"Library scan failed: {exc}", "error")
+            return redirect(url_for("settings.settings"))
+
         service.set("library_key", library_key)
         service.set("sonarr_url", sonarr_url)
         service.set("sonarr_api_key", sonarr_api_key)
         service.set("library_root_override", library_root_override)
-        if plex_url and plex_token and library_key:
-            try:
-                sections = PlexClient(plex_url, plex_token).list_sections()
-                matched = next((s for s in sections if str(s.get("key")) == library_key), None)
-                service.set("trusted_library_paths", matched.get("locations", []) if matched else [])
-            except Exception:
-                service.set("trusted_library_paths", [])
+
+        sections = service.get(sections_cache_key, [])
+        matched = next((s for s in sections if str(s.get("key")) == library_key), None)
+        service.set("trusted_library_paths", matched.get("locations", []) if matched else [])
         flash("Settings saved.", "success")
         return redirect(url_for("settings.settings"))
 
@@ -43,16 +54,11 @@ def settings():
     library_root_override = service.get("library_root_override", "")
     selected_library = service.get("library_key", "")
 
-    sections = []
+    sections = service.get(sections_cache_key, [])
     plex_ok = False
     if plex_url and plex_token:
         plex = PlexClient(plex_url, plex_token)
         plex_ok, _ = plex.validate()
-        if plex_ok:
-            try:
-                sections = [s for s in plex.list_sections() if s.get("type") == "show"]
-            except Exception as exc:
-                flash(f"Could not load libraries: {exc}", "error")
 
     sonarr_status = None
     if sonarr_url and sonarr_api_key:

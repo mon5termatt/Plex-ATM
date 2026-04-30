@@ -77,10 +77,12 @@ Example:
 
 ```yaml
 volumes:
-  - ./data:/app/data
+  - plex_atm_data:/app/data
   - "D:/TV:/tv"
   - "D:/Anime:/anime"
 ```
+
+The app database/settings persist in the Docker named volume `plex_atm_data` (so recreating the container does not reset settings).
 
 Only if needed (path mismatch): if source paths use a different prefix than your container mount (for example `/plex/ANIME/...`), set:
 
