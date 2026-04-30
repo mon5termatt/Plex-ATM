@@ -54,6 +54,14 @@ See `DOCKER.md` for full details.
 
 Quick start:
 
+```bash
+git clone https://github.com/mon5termatt/Plex-ATM.git
+cd Plex-ATM
+docker compose up -d --build
+```
+
+or if already cloned:
+
 ```powershell
 docker compose up -d --build
 ```
