@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.cursor/
+data/
+agent-tools/
+terminals/
+mcps/

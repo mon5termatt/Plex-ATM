@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="row">
+  <h2>Cached Plex Shows</h2>
+  <form method="post" action="{{ url_for('shows.rescan_shows') }}">
+    <button type="submit">Rescan Library</button>
+  </form>
+</section>
+
+{% if not library_key %}
+  <p class="card">Configure Plex and select a TV library in Settings first.</p>
+{% elif shows %}
+  <table class="card table">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Year</th>
+        <th>Folder</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for show in shows %}
+      <tr>
+        <td>{{ show.title }}</td>
+        <td>{{ show.year or "-" }}</td>
+        <td>{{ show.folder_path }}</td>
+        <td><a href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}">Manage Theme</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="card">No cached shows yet. Click Rescan Library to populate cache.</p>
+{% endif %}
+{% endblock %}

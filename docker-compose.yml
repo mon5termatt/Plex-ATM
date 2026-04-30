@@ -1,0 +1,22 @@
+services:
+  plex-theme-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: plex-theme-manager
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_RUN_HOST: "0.0.0.0"
+      FLASK_RUN_PORT: "5000"
+      FLASK_DEBUG: "0"
+      APP_DATABASE_PATH: "/app/data/app.db"
+      APP_UPLOAD_DIR: "/app/data/uploads"
+      APP_LOG_DIR: "/app/data/logs"
+    volumes:
+      - ./data:/app/data
+      # Map your media library roots here.
+      # Example:
+      # - "D:/TV:/media/tv"
+      # - "D:/Anime:/media/anime"
+    restart: unless-stopped

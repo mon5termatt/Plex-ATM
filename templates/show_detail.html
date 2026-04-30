@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="shows-layout">
+  <section class="shows-main">
+    <section class="row">
+      <h2>{{ show.title }}</h2>
+      <a href="{{ url_for('shows.list_shows') }}">Back to shows</a>
+    </section>
+    <p class="card"><strong>Folder:</strong> {{ show.folder_path }}</p>
+
+    <section class="card">
+      <h3>Find AnimeThemes Candidates</h3>
+      <form method="post" action="{{ url_for('shows.find_candidates', rating_key=show.rating_key) }}">
+        <label>Search Query (Romaji)
+          <input type="text" id="search-query-input" name="search_query" value="{{ initial_search_query }}">
+        </label>
+        {% if sonarr_alternate_queries %}
+        <div class="alt-title-block">
+          <strong>Sonarr Alternate Titles</strong>
+          <div class="alt-title-list">
+            {% for q in sonarr_alternate_queries %}
+              <button type="button" class="alt-title-btn" data-alt-query="{{ q }}">{{ q }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        <div class="request-preview">
+          <strong>Request Preview (before submit)</strong>
+          <pre id="request-preview-box"></pre>
+        </div>
+        <button type="submit">Find Themes</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h3>Upload Custom Theme</h3>
+      <form method="post" action="{{ url_for('shows.upload_theme', rating_key=show.rating_key) }}" enctype="multipart/form-data">
+        <input type="file" name="theme_file" accept=".mp3,.m4a,.flac,.ogg">
+        <button type="submit">Upload and Apply</button>
+      </form>
+    </section>
+  </section>
+
+  <aside class="apply-sidebar">
+    <section class="card">
+      <h3>Apply Candidate</h3>
+      {% if candidates %}
+      <div class="candidate-list">
+        {% for c in candidates %}
+        <article class="candidate-item">
+          <div class="candidate-meta">
+            <strong>{{ c.label }}</strong>
+            <small>Source: {{ c.source }}</small>
+          </div>
+          {% if c.audio_url %}
+          <div class="audio-player" data-audio-player>
+            <audio preload="metadata" class="candidate-audio" data-audio-element>
+              <source src="{{ c.audio_url }}">
+              Your browser does not support audio preview.
+            </audio>
+            <div class="audio-controls">
+              <button type="button" class="audio-play-btn" data-audio-play>Play</button>
+              <input type="range" min="0" max="100" value="0" class="audio-progress" data-audio-progress>
+              <span class="audio-time" data-audio-time>0:00 / 0:00</span>
+            </div>
+          </div>
+          {% else %}
+          <p>No preview URL available for this candidate.</p>
+          {% endif %}
+          <form method="post" action="{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}">
+            <input type="hidden" name="candidate_id" value="{{ c.id }}">
+            <button type="submit">Apply This Theme</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p>No candidates saved yet.</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+
+<section class="card debug-panel">
+  <h3>Show Debug Data</h3>
+  <details class="inspector-dropdown" open>
+    <summary>AnimeThemes Lookup Payload</summary>
+    <pre>{{ api_debug.get("animethemes_lookup", {"info": "No lookup recorded yet for this show."}) | tojson(indent=2) }}</pre>
+  </details>
+
+  <details class="inspector-dropdown">
+    <summary>Plex Metadata Response</summary>
+    <pre>{{ (live_plex if live_plex is not none else {"info": "Plex not configured or unavailable."}) | tojson(indent=2) }}</pre>
+  </details>
+
+  <details class="inspector-dropdown">
+    <summary>Sonarr Matched Series Response</summary>
+    <pre>{{ (live_sonarr if live_sonarr is not none else {"info": "Sonarr not configured or no match found."}) | tojson(indent=2) }}</pre>
+  </details>
+
+  <details class="inspector-dropdown">
+    <summary>Install History</summary>
+    <pre>{{ installs | tojson(indent=2) }}</pre>
+  </details>
+</section>
+<script>
+  (function () {
+    const input = document.getElementById("search-query-input");
+    const preview = document.getElementById("request-preview-box");
+    const altButtons = document.querySelectorAll(".alt-title-btn");
+    const audioPlayers = document.querySelectorAll("[data-audio-player]");
+    const base = "{{ animethemes_base_url }}/anime";
+
+    function uniquePush(arr, value) {
+      if (value && !arr.includes(value)) arr.push(value);
+    }
+
+    function buildVariants(raw) {
+      const variants = [];
+      const baseText = (raw || "").trim();
+      uniquePush(variants, baseText);
+
+      const relaxed = baseText.replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+      uniquePush(variants, relaxed);
+
+      const withoutLeadingNum = relaxed.replace(/^\d+(?:\.\d+)?\s+/, "").trim();
+      uniquePush(variants, withoutLeadingNum);
+
+      return variants.slice(0, 3);
+    }
+
+    function buildUrl(query) {
+      const params = new URLSearchParams();
+      params.set("filter[has]", "animethemes");
+      params.set("filter[name]", query);
+      params.set("include", "animethemes.animethemeentries.videos.audio,animethemes.song,animethemes.song.artists");
+      return `${base}?${params.toString()}`;
+    }
+
+    function renderPreview() {
+      const variants = buildVariants(input.value);
+      if (!variants.length) {
+        preview.textContent = "Enter a search query to preview requests.";
+        return;
+      }
+      preview.textContent = variants
+        .map((q, idx) => `Attempt ${idx + 1} query="${q}"\n${buildUrl(q)}`)
+        .join("\n\n");
+    }
+
+    input.addEventListener("input", renderPreview);
+    if (altButtons.length) {
+      altButtons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+        const value = btn.getAttribute("data-alt-query");
+        if (!value) return;
+        input.value = value;
+        renderPreview();
+      });
+      });
+    }
+
+    function formatTime(seconds) {
+      if (!isFinite(seconds) || seconds < 0) return "0:00";
+      const minutes = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${minutes}:${secs.toString().padStart(2, "0")}`;
+    }
+
+    function stopOtherPlayers(currentAudio) {
+      audioPlayers.forEach((player) => {
+        const audio = player.querySelector("[data-audio-element]");
+        const playBtn = player.querySelector("[data-audio-play]");
+        if (audio && audio !== currentAudio) {
+          audio.pause();
+          if (playBtn) playBtn.textContent = "Play";
+        }
+      });
+    }
+
+    audioPlayers.forEach((player) => {
+      const audio = player.querySelector("[data-audio-element]");
+      const playBtn = player.querySelector("[data-audio-play]");
+      const progress = player.querySelector("[data-audio-progress]");
+      const time = player.querySelector("[data-audio-time]");
+      if (!audio || !playBtn || !progress || !time) return;
+
+      playBtn.addEventListener("click", () => {
+        if (audio.paused) {
+          stopOtherPlayers(audio);
+          audio.play();
+        } else {
+          audio.pause();
+        }
+      });
+
+      audio.addEventListener("play", () => {
+        playBtn.textContent = "Pause";
+      });
+
+      audio.addEventListener("pause", () => {
+        playBtn.textContent = "Play";
+      });
+
+      audio.addEventListener("ended", () => {
+        playBtn.textContent = "Play";
+      });
+
+      audio.addEventListener("loadedmetadata", () => {
+        time.textContent = `${formatTime(0)} / ${formatTime(audio.duration)}`;
+      });
+
+      audio.addEventListener("timeupdate", () => {
+        if (audio.duration > 0) {
+          const pct = (audio.currentTime / audio.duration) * 100;
+          progress.value = String(pct);
+        }
+        time.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+      });
+
+      progress.addEventListener("input", () => {
+        if (audio.duration > 0) {
+          audio.currentTime = (Number(progress.value) / 100) * audio.duration;
+        }
+      });
+    });
+
+    renderPreview();
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Settings</h2>
+<form method="post" class="card form-grid">
+  <label>Plex URL
+    <input name="plex_url" value="{{ plex_url }}" placeholder="http://127.0.0.1:32400">
+  </label>
+  <label>Plex Token
+    <input name="plex_token" value="{{ plex_token }}" placeholder="X-Plex-Token">
+  </label>
+  <label>TV Library
+    <select name="library_key">
+      <option value="">-- Select show library --</option>
+      {% for section in sections %}
+      <option value="{{ section.key }}" {% if section.key == selected_library %}selected{% endif %}>
+        {{ section.title }} ({{ section.key }})
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Sonarr URL (optional)
+    <input name="sonarr_url" value="{{ sonarr_url }}" placeholder="http://127.0.0.1:8989">
+  </label>
+  <label>Sonarr API Key (optional)
+    <input name="sonarr_api_key" value="{{ sonarr_api_key }}" placeholder="Sonarr API Key">
+  </label>
+  <button type="submit">Save Settings</button>
+</form>
+
+<section class="card">
+  <h3>Connection Status</h3>
+  <p>Plex: {{ "Connected" if plex_ok else "Not Connected" }}</p>
+  {% if sonarr_status %}
+    <p>Sonarr: {{ "Connected" if sonarr_status.ok else "Not Connected" }}</p>
+  {% endif %}
+</section>
+{% endblock %}

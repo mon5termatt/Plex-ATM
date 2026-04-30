@@ -1,0 +1,285 @@
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #12131a;
+  color: #f2f4f8;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: #1a1d27;
+  border-bottom: 1px solid #2b3040;
+}
+
+.topbar a {
+  color: #9dd8ff;
+  margin-left: 16px;
+  text-decoration: none;
+}
+
+.debug-toggle {
+  margin-left: 16px;
+  font-size: 13px;
+  color: #c6d0e6;
+}
+
+.debug-toggle input {
+  width: auto;
+  display: inline-block;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 20px auto;
+  padding: 0 16px;
+}
+
+.card {
+  background: #1c202b;
+  border: 1px solid #2b3040;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+input, select, button {
+  display: block;
+  margin-top: 6px;
+  width: 100%;
+  padding: 9px;
+  border-radius: 6px;
+  border: 1px solid #3c4357;
+  background: #12131a;
+  color: #f2f4f8;
+}
+
+button {
+  cursor: pointer;
+  background: #2d8cff;
+  border-color: #2d8cff;
+  font-weight: 600;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th, .table td {
+  padding: 10px;
+  border-bottom: 1px solid #30364a;
+  text-align: left;
+}
+
+.flash-list {
+  margin-bottom: 16px;
+}
+
+.flash {
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.flash-success {
+  background: #0f3d29;
+}
+
+.flash-error {
+  background: #4a1f24;
+}
+
+.shows-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 16px;
+  align-items: start;
+}
+
+.shows-main {
+  min-width: 0;
+}
+
+.apply-sidebar {
+  position: sticky;
+  top: 12px;
+}
+
+.debug-console {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 70px);
+  overflow: hidden;
+}
+
+.debug-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.debug-console pre {
+  background: #12131a;
+  border: 1px solid #2b3040;
+  border-radius: 6px;
+  padding: 10px;
+  margin: 0;
+  color: #9ee7b0;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: calc(100vh - 150px);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.request-preview {
+  margin: 8px 0 12px;
+}
+
+.request-preview pre {
+  background: #12131a;
+  border: 1px solid #2b3040;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 6px;
+  color: #d4dcff;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.candidate-item {
+  border: 1px solid #2b3040;
+  border-radius: 8px;
+  padding: 10px;
+  background: #171a23;
+}
+
+.candidate-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.candidate-meta small {
+  color: #9ba7c2;
+}
+
+.candidate-audio {
+  display: none;
+}
+
+.audio-player {
+  border: 1px solid #30364a;
+  border-radius: 8px;
+  background: #11141d;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.audio-controls {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.audio-play-btn {
+  width: auto;
+  min-width: 72px;
+  padding: 7px 10px;
+  margin: 0;
+  background: #3a6de0;
+  border-color: #3a6de0;
+}
+
+.audio-progress {
+  margin: 0;
+  width: 100%;
+  padding: 0;
+  height: 4px;
+}
+
+.audio-time {
+  font-size: 12px;
+  color: #b8c2dc;
+  min-width: 80px;
+  text-align: right;
+}
+
+.alt-title-block {
+  margin: 8px 0 12px;
+}
+
+.alt-title-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.alt-title-btn {
+  width: auto;
+  padding: 6px 10px;
+  background: #2a3142;
+  border-color: #3c4357;
+  font-size: 12px;
+}
+
+.debug-panel {
+  display: none;
+}
+
+body.show-debug .debug-panel {
+  display: block;
+}
+
+.inspector-dropdown {
+  border: 1px solid #2b3040;
+  border-radius: 8px;
+  background: #171a23;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.inspector-dropdown summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+.inspector-dropdown pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid #2b3040;
+  background: #12131a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 380px;
+  overflow: auto;
+}
+
