@@ -8,8 +8,23 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+  {% set brand_href = url_for('shows.list_shows') %}
+  {% if back_to_list_url is defined and back_to_list_url %}
+    {% set brand_href = back_to_list_url %}
+  {% elif request.endpoint == 'shows.list_shows' %}
+    {% set brand_href = url_for(
+      'shows.list_shows',
+      q=request.args.get('q', ''),
+      theme_filter=request.args.get('theme_filter', 'all'),
+      sort_by=request.args.get('sort_by', 'title'),
+      sort_dir=request.args.get('sort_dir', 'asc'),
+      page=request.args.get('page', '1'),
+      page_size=request.args.get('page_size', '50'),
+      view=request.args.get('view', 'table')
+    ) %}
+  {% endif %}
   <header class="topbar">
-    <a class="brand brand-link" href="{{ url_for('shows.list_shows') }}">
+    <a class="brand brand-link" href="{{ brand_href }}">
       <img src="{{ url_for('static', filename='logo.svg') }}" alt="Plex ATM logo" class="brand-logo">
       <div class="brand-text">
         <h1>Plex ATM</h1>
