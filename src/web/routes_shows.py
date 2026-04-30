@@ -311,6 +311,7 @@ def rescan_shows():
 def show_detail(rating_key: str):
     svc = _services()
     svc["settings"].set("debug_logs", [])
+    trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
     with get_conn(current_app.config["DATABASE_PATH"]) as conn:
         show = conn.execute(
             "SELECT rating_key, title, year, folder_path FROM plex_shows_cache WHERE rating_key = ?",
@@ -328,6 +329,12 @@ def show_detail(rating_key: str):
     if not show:
         flash("Show not found in cache.", "error")
         return redirect(url_for("shows.list_shows"))
+    show_data = dict(show)
+    show_data["folder_path"] = _resolve_existing_show_folder_path(
+        svc,
+        show_data["folder_path"],
+        trusted_roots=trusted_roots,
+    )
 
     live_plex = None
     plex_url = svc["settings"].get("plex_url", "")
@@ -360,7 +367,7 @@ def show_detail(rating_key: str):
                             if raw.isdigit():
                                 tmdb_id = int(raw)
             live_sonarr = SonarrClient(sonarr_url, sonarr_api_key).find_series_for_show(
-                show["title"],
+                show_data["title"],
                 tvdb_id=tvdb_id,
                 tmdb_id=tmdb_id,
             )
@@ -368,7 +375,7 @@ def show_detail(rating_key: str):
             live_sonarr = {"error": str(exc)}
 
     search_overrides = svc["settings"].get("show_search_overrides", {})
-    initial_query = search_overrides.get(rating_key, show["title"])
+    initial_query = search_overrides.get(rating_key, show_data["title"])
     initial_query = AnimeThemesClient.to_romaji_query(initial_query) or initial_query
     sonarr_alternate_queries: list[str] = []
     if isinstance(live_sonarr, dict):
@@ -382,11 +389,11 @@ def show_detail(rating_key: str):
                 break
     debug_logs = []
     api_debug = svc["settings"].get("show_api_debug", {}).get(rating_key, {})
-    local_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
+    local_theme_path = _find_theme_file_in_show_folder(show_data["folder_path"])
     local_theme_available = bool(local_theme_path)
     return render_template(
         "show_detail.html",
-        show=dict(show),
+        show=show_data,
         candidates=[dict(c) for c in candidates],
         local_theme_available=local_theme_available,
         installs=[dict(i) for i in installs],
