@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 
@@ -80,6 +81,43 @@ class ThemeApplyService:
         return target
 
     @staticmethod
+    def _reencode_to_mp3_128k(source_bytes: bytes) -> bytes:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".input") as in_tmp:
+            in_tmp.write(source_bytes)
+            in_path = in_tmp.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as out_tmp:
+            out_path = out_tmp.name
+
+        try:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                in_path,
+                "-vn",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                out_path,
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                stderr = (proc.stderr or "").strip()
+                raise RuntimeError(f"ffmpeg re-encode failed: {stderr[-400:]}")
+            with open(out_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.remove(in_path)
+            except OSError:
+                pass
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+    @staticmethod
     def _verify_written_file(path: str) -> tuple[bool, str]:
         if not os.path.exists(path):
             return (False, f"File missing after write: {path}")
@@ -96,7 +134,8 @@ class ThemeApplyService:
         try:
             response = requests.get(audio_url, timeout=45)
             response.raise_for_status()
-            path = self._safe_write(folder_path, filename, response.content)
+            mp3_bytes = self._reencode_to_mp3_128k(response.content)
+            path = self._safe_write(folder_path, filename, mp3_bytes)
             ok, verify_msg = self._verify_written_file(path)
             status = "success" if ok else "failed"
             self._log_install(show_rating_key, "animethemes", path, status, verify_msg)
@@ -107,7 +146,8 @@ class ThemeApplyService:
 
     def install_from_upload(self, show_rating_key: str, folder_path: str, uploaded_bytes: bytes, filename: str = "theme.mp3") -> tuple[bool, str]:
         try:
-            path = self._safe_write(folder_path, filename, uploaded_bytes)
+            mp3_bytes = self._reencode_to_mp3_128k(uploaded_bytes)
+            path = self._safe_write(folder_path, filename, mp3_bytes)
             ok, verify_msg = self._verify_written_file(path)
             status = "success" if ok else "failed"
             self._log_install(show_rating_key, "custom_upload", path, status, verify_msg)

@@ -22,6 +22,7 @@ It integrates with:
 - Uses **audio-only** candidate links (no video fallback)
 - Lets you preview candidates in-app and apply selected theme
 - Supports custom upload fallback
+- Re-encodes applied themes to **MP3 128kbps** via ffmpeg for consistent Plex theme playback
 
 ## Current Workflow
 

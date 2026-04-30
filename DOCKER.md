@@ -28,6 +28,8 @@ docker compose up -d --build
 
 Open: `http://localhost:5000`
 
+Note: the container includes `ffmpeg` and will re-encode applied themes to MP3 128kbps.
+
 ## 4) Set Plex/Sonarr paths to container-visible paths
 
 Preferred approach: keep Plex/Sonarr/library paths container-native (for example `/tv/...` or `/anime/...`) and mount host media into those same container paths.
