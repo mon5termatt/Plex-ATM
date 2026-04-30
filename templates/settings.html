@@ -7,7 +7,10 @@
     <input name="plex_url" value="{{ plex_url }}" placeholder="http://127.0.0.1:32400">
   </label>
   <label>Plex Token
-    <input name="plex_token" value="{{ plex_token }}" placeholder="X-Plex-Token">
+    <div class="token-input-row">
+      <input id="plex-token-input" type="password" name="plex_token" value="{{ plex_token }}" placeholder="X-Plex-Token" autocomplete="off">
+      <button type="button" id="toggle-plex-token" class="secondary-btn token-toggle-btn">Show</button>
+    </div>
   </label>
   <button type="submit" class="secondary-btn" onclick="document.getElementById('settings-action-input').value='scan_libraries'">
     Scan Libraries
@@ -54,4 +57,17 @@
     <pre>{{ show_api_debug | tojson(indent=2) }}</pre>
   </details>
 </section>
+<script>
+  (function () {
+    const tokenInput = document.getElementById("plex-token-input");
+    const toggleBtn = document.getElementById("toggle-plex-token");
+    if (!tokenInput || !toggleBtn) return;
+
+    toggleBtn.addEventListener("click", function () {
+      const isHidden = tokenInput.type === "password";
+      tokenInput.type = isHidden ? "text" : "password";
+      toggleBtn.textContent = isHidden ? "Hide" : "Show";
+    });
+  })();
+</script>
 {% endblock %}

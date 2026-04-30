@@ -381,6 +381,19 @@ button {
   margin-bottom: 0;
 }
 
+.token-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.token-toggle-btn {
+  width: auto;
+  margin: 6px 0 0;
+  padding: 9px 12px;
+}
+
 .show-poster-thumb {
   width: 48px;
   height: 72px;
