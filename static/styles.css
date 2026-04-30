@@ -26,6 +26,11 @@ body {
   gap: 10px;
 }
 
+.brand-link {
+  color: inherit;
+  text-decoration: none;
+}
+
 .brand-logo {
   width: 34px;
   height: 34px;
