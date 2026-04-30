@@ -85,28 +85,29 @@ class PlexCacheService:
         preferred_queries: dict[str, str] = {}
         for item in fresh:
             item["preferred_query"] = None
-            if item.get("folder_path"):
-                tvdb_id = item.get("tvdb_id")
-                if tvdb_id and query_by_tvdb.get(str(tvdb_id)):
-                    item["preferred_query"] = query_by_tvdb[str(tvdb_id)]
-                tmdb_id = item.get("tmdb_id")
-                if not item.get("preferred_query") and tmdb_id and query_by_tmdb.get(str(tmdb_id)):
-                    item["preferred_query"] = query_by_tmdb[str(tmdb_id)]
-            else:
-                tvdb_id = item.get("tvdb_id")
-                if tvdb_id and sonarr_by_tvdb.get(str(tvdb_id)):
-                    item["folder_path"] = sonarr_by_tvdb[str(tvdb_id)]
-                    item["preferred_query"] = query_by_tvdb.get(str(tvdb_id))
-                    continue
-                tmdb_id = item.get("tmdb_id")
-                if tmdb_id and sonarr_by_tmdb.get(str(tmdb_id)):
-                    item["folder_path"] = sonarr_by_tmdb[str(tmdb_id)]
-                    item["preferred_query"] = query_by_tmdb.get(str(tmdb_id))
-                    continue
+            tvdb_id = item.get("tvdb_id")
+            tmdb_id = item.get("tmdb_id")
             normalized_title = self._normalize_title(item.get("title", ""))
+
+            # Prefer Sonarr path when available to keep container paths canonical (e.g. /tv/...).
+            if tvdb_id and sonarr_by_tvdb.get(str(tvdb_id)):
+                item["folder_path"] = sonarr_by_tvdb[str(tvdb_id)]
+                item["preferred_query"] = query_by_tvdb.get(str(tvdb_id))
+                continue
+            if tmdb_id and sonarr_by_tmdb.get(str(tmdb_id)):
+                item["folder_path"] = sonarr_by_tmdb[str(tmdb_id)]
+                item["preferred_query"] = query_by_tmdb.get(str(tmdb_id))
+                continue
             if normalized_title and sonarr_by_title.get(normalized_title):
                 item["folder_path"] = sonarr_by_title[normalized_title]
                 item["preferred_query"] = query_by_title.get(normalized_title)
+                continue
+
+            # No Sonarr match; preserve Plex path and still set preferred query if available.
+            if tvdb_id and query_by_tvdb.get(str(tvdb_id)):
+                item["preferred_query"] = query_by_tvdb[str(tvdb_id)]
+            elif tmdb_id and query_by_tmdb.get(str(tmdb_id)):
+                item["preferred_query"] = query_by_tmdb[str(tmdb_id)]
 
         fresh = [item for item in fresh if item.get("folder_path")]
         fresh_map = {item["rating_key"]: item for item in fresh}

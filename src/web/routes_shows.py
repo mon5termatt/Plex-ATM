@@ -42,14 +42,14 @@ def _is_within_trusted_paths(folder_path: str, trusted_paths: list[str]) -> bool
     return False
 
 
-def _runtime_trusted_paths(svc: dict) -> list[str]:
+def _runtime_trusted_paths(svc: dict, include_sonarr: bool = True) -> list[str]:
     paths = list(svc["settings"].get("trusted_library_paths", []) or [])
     library_root_override = str(svc["settings"].get("library_root_override", "") or "").strip()
     if library_root_override:
         paths.append(library_root_override)
     sonarr_url = svc["settings"].get("sonarr_url", "")
     sonarr_api_key = svc["settings"].get("sonarr_api_key", "")
-    if sonarr_url and sonarr_api_key:
+    if include_sonarr and sonarr_url and sonarr_api_key:
         try:
             sonarr_series = SonarrClient(sonarr_url, sonarr_api_key).list_series()
             for row in sonarr_series:
@@ -81,6 +81,47 @@ def _resolve_write_folder(svc: dict, folder_path: str) -> str:
     if not leaf:
         return folder_path
     return os.path.join(override_root, leaf)
+
+
+def _resolve_existing_show_folder_path(svc: dict, folder_path: str, trusted_roots: list[str] | None = None) -> str:
+    """
+    Prefer an existing folder path at runtime.
+    - If provided path exists, use it.
+    - Otherwise try common/container roots (e.g. /tv) with same show folder basename.
+    - Otherwise keep original.
+    """
+    raw = str(folder_path or "").strip()
+    if not raw:
+        return raw
+    leaf = os.path.basename(os.path.normpath(raw))
+    mapped = _apply_runtime_path_mappings(raw)
+    if not leaf:
+        return mapped or raw
+
+    # Prefer container-native mounted roots first.
+    candidate_roots = ["/tv", "/anime", "/media/tv", "/media/anime"]
+    candidate_roots.extend(trusted_roots if trusted_roots is not None else _runtime_trusted_paths(svc))
+
+    seen = set()
+    for root in candidate_roots:
+        root = str(root or "").strip()
+        if not root:
+            continue
+        key = root.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidate = os.path.join(root, leaf)
+        if os.path.isdir(candidate):
+            return candidate
+
+    # Fallback to direct paths if no preferred-root candidate exists.
+    if os.path.isdir(raw):
+        return raw
+    if mapped and os.path.isdir(mapped):
+        return mapped
+
+    return mapped or raw
 
 
 def _apply_runtime_path_mappings(path: str) -> str:
@@ -166,11 +207,13 @@ def list_shows():
     total = 0
     if library_key:
         shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
+    # Fast path for large libraries: don't fetch Sonarr series list during shows index render.
+    trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
 
     enriched = []
     for row in shows:
         show = dict(row)
-        show["folder_path"] = _apply_runtime_path_mappings(show["folder_path"]) or show["folder_path"]
+        show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
         current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
         show["has_current_theme"] = bool(current_theme_path)
         if theme_filter == "has" and not show["has_current_theme"]:
@@ -369,7 +412,7 @@ def play_current_theme(rating_key: str):
         flash("Show not found.", "error")
         return redirect(url_for("shows.list_shows"))
 
-    target_folder = _apply_runtime_path_mappings(show["folder_path"]) or show["folder_path"]
+    target_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
     trusted_paths = _runtime_trusted_paths(svc)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Current theme path is outside trusted library paths.", "error")
@@ -498,7 +541,8 @@ def apply_candidate(rating_key: str):
         flash("Candidate or show not found.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
     trusted_paths = _runtime_trusted_paths(svc)
-    target_folder = _resolve_write_folder(svc, show["folder_path"])
+    show_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
+    target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
@@ -528,7 +572,8 @@ def upload_theme(rating_key: str):
             return redirect(url_for("shows.list_shows"))
 
     trusted_paths = _runtime_trusted_paths(svc)
-    target_folder = _resolve_write_folder(svc, show["folder_path"])
+    show_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
+    target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Target folder is outside trusted Plex library paths.", "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key))
