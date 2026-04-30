@@ -47,9 +47,13 @@
           <summary>Request Preview (before submit)</summary>
           <pre id="request-preview-box"></pre>
         </details>
-        <button type="submit">Find Themes</button>
+        <button type="submit" id="find-themes-submit-btn">Find Themes</button>
       </form>
       <p id="find-themes-status" class="muted-text" hidden></p>
+      <div id="find-themes-loading" class="loading-indicator" hidden aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span>Please wait, fetching themes<span class="loading-dots"></span></span>
+      </div>
     </section>
 
     <section class="card">
@@ -142,7 +146,9 @@
     const preview = document.getElementById("request-preview-box");
     const altButtons = document.querySelectorAll(".alt-title-btn");
     const findForm = document.getElementById("find-themes-form");
+    const submitBtn = document.getElementById("find-themes-submit-btn");
     const statusEl = document.getElementById("find-themes-status");
+    const loadingEl = document.getElementById("find-themes-loading");
     const candidatesContainer = document.getElementById("apply-candidates-container");
     const emptyState = document.getElementById("apply-empty-state");
     const applyAction = "{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}";
@@ -407,9 +413,11 @@
         console.groupEnd();
 
         const formData = new FormData(findForm);
+        if (submitBtn) submitBtn.disabled = true;
+        if (loadingEl) loadingEl.hidden = false;
         if (statusEl) {
-          statusEl.hidden = false;
-          statusEl.textContent = "Finding themes...";
+          statusEl.hidden = true;
+          statusEl.textContent = "";
         }
         try {
           const response = await fetch(findForm.action, {
@@ -425,13 +433,18 @@
             throw new Error(payload.message || "Theme lookup failed.");
           }
           if (statusEl) {
+            statusEl.hidden = false;
             statusEl.textContent = payload.message || "Themes updated.";
           }
           renderCandidates(payload.candidates || [], Boolean(payload.local_theme_url || localThemeInitially), payload.local_theme_url || localThemeUrl);
         } catch (err) {
           if (statusEl) {
+            statusEl.hidden = false;
             statusEl.textContent = `Error: ${err.message || err}`;
           }
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+          if (loadingEl) loadingEl.hidden = true;
         }
       });
     }

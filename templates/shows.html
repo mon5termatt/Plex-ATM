@@ -2,10 +2,12 @@
 {% block content %}
 {% set next_sort_dir = "desc" if sort_dir == "asc" else "asc" %}
 <section class="row">
-  <h2>Cached Plex Shows</h2>
-  <form method="post" action="{{ url_for('shows.rescan_shows') }}">
-    <button type="submit">Rescan Library</button>
-  </form>
+  <h2>Shows Found in Selected Library</h2>
+  <div class="view-switch">
+    <form method="post" action="{{ url_for('shows.rescan_shows') }}">
+      <button type="submit">Rescan Library</button>
+    </form>
+  </div>
 </section>
 
 <form method="get" action="{{ url_for('shows.list_shows') }}" class="card filter-row">
@@ -46,7 +48,7 @@
         {% endif %}
       </a>
       <h3 class="show-grid-title">{{ show.title }}</h3>
-      <p class="muted-text show-grid-meta">{{ show.year or "-" }}</p>
+      <p class="muted-text show-grid-meta">{{ show.year or "-" }} | Candidates: {{ show.candidate_count }}</p>
       <div class="show-grid-buttons">
         {% if show.has_current_theme %}
           <button
@@ -77,6 +79,7 @@
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc'), view=view_mode) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc'), view=view_mode) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='folder', sort_dir=(next_sort_dir if sort_by == 'folder' else 'asc'), view=view_mode) }}">Folder{% if sort_by == 'folder' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th>Candidates</th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='has_theme', sort_dir=(next_sort_dir if sort_by == 'has_theme' else 'asc'), view=view_mode) }}">Current Theme{% if sort_by == 'has_theme' %} ({{ sort_dir }}){% endif %}</a></th>
         <th>Actions</th>
       </tr>
@@ -94,6 +97,7 @@
         <td>{{ show.title }}</td>
         <td>{{ show.year or "-" }}</td>
         <td>{{ show.folder_path }}</td>
+        <td>{{ show.candidate_count }}</td>
         <td>
           {% if show.has_current_theme %}
             <button

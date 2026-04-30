@@ -501,6 +501,80 @@ button {
   cursor: not-allowed;
 }
 
+.bulk-scan-list {
+  display: grid;
+  gap: 8px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.bulk-scan-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #2b3040;
+  border-radius: 6px;
+  background: #171a23;
+}
+
+.bulk-scan-item input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.loading-indicator {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9dd8ff;
+  font-weight: 600;
+}
+
+.loading-indicator[hidden] {
+  display: none;
+}
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #3c4357;
+  border-top-color: #2d8cff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-dots::after {
+  content: "";
+  display: inline-block;
+  width: 1.4em;
+  text-align: left;
+  animation: dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75%,
+  100% {
+    content: "...";
+  }
+}
+
 @media (max-width: 1000px) {
   .shows-layout {
     grid-template-columns: 1fr;
@@ -581,7 +655,11 @@ button {
   }
 }
 
-@media (max-width: 499px) {
+@media (max-width: 500px) {
+  .filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .show-grid-card {
     min-height: 0;
     height: auto;

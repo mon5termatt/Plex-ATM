@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="row">
+  <h2>Bulk Scan Themes</h2>
+  <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows') }}">Back to Shows</a>
+</section>
+
+<section class="card">
+  <div class="row">
+    <p class="muted-text">Select shows to scan and cache AnimeThemes candidates.</p>
+    <div class="view-switch">
+      <button type="button" class="secondary-btn" id="bulk-select-all-btn">Select All</button>
+      <button type="button" class="secondary-btn" id="bulk-clear-all-btn">Clear All</button>
+      <button type="button" class="secondary-btn" id="bulk-select-zero-candidates-btn">Select 0 Candidates</button>
+      <button type="button" class="secondary-btn" id="bulk-select-no-animethemes-btn">Select No AnimeThemes</button>
+      <button type="button" class="secondary-btn" id="bulk-select-visible-btn">Select Visible</button>
+      <button type="button" id="bulk-start-btn">Start Bulk Scan</button>
+    </div>
+  </div>
+  <div class="filter-row">
+    <input type="text" id="bulk-search-input" placeholder="Filter shows by title...">
+    <button type="button" class="secondary-btn" id="bulk-select-first-10-btn">Select First 10 Visible</button>
+    <button type="button" class="secondary-btn" id="bulk-select-first-25-btn">Select First 25 Visible</button>
+    <button type="button" class="secondary-btn" id="bulk-clear-visible-btn">Clear Visible</button>
+  </div>
+  <p class="muted-text" id="bulk-selection-count">0 selected</p>
+  <section id="bulk-scan-progress" class="card" hidden>
+    <strong id="bulk-scan-message">Bulk scan in progress...</strong>
+    <p class="muted-text" id="bulk-scan-stats"></p>
+  </section>
+</section>
+
+{% if bulk_scan_results and bulk_scan_results.get("ran_at") %}
+  <section class="card">
+    <details>
+      <summary>Last Bulk Scan Results</summary>
+      <p class="muted-text">
+        Ran {{ bulk_scan_results.get("ran_at") }} | Scanned {{ bulk_scan_results.get("scanned", 0) }} | Matched {{ bulk_scan_results.get("matched", 0) }} | Saved {{ bulk_scan_results.get("saved_candidates", 0) }} | Failed {{ bulk_scan_results.get("failed", 0) }}
+      </p>
+    </details>
+  </section>
+{% endif %}
+
+<section class="card">
+  <div class="bulk-scan-list" id="bulk-scan-list">
+    {% for show in shows %}
+      <label class="bulk-scan-item" data-show-title="{{ (show.title or '')|lower }}" data-candidate-count="{{ show.candidate_count }}" data-animethemes-count="{{ show.animethemes_count }}">
+        <input type="checkbox" class="bulk-scan-checkbox" value="{{ show.rating_key }}" data-candidate-count="{{ show.candidate_count }}" data-animethemes-count="{{ show.animethemes_count }}">
+        <span>{{ show.title }} {% if show.year %}({{ show.year }}){% endif %} - Candidates: {{ show.candidate_count }} - AnimeThemes: {{ show.animethemes_count }}</span>
+      </label>
+    {% endfor %}
+  </div>
+</section>
+
+<script>
+  (function () {
+    const startBtn = document.getElementById("bulk-start-btn");
+    const selectAllBtn = document.getElementById("bulk-select-all-btn");
+    const clearAllBtn = document.getElementById("bulk-clear-all-btn");
+    const selectZeroCandidatesBtn = document.getElementById("bulk-select-zero-candidates-btn");
+    const selectNoAnimeThemesBtn = document.getElementById("bulk-select-no-animethemes-btn");
+    const selectVisibleBtn = document.getElementById("bulk-select-visible-btn");
+    const clearVisibleBtn = document.getElementById("bulk-clear-visible-btn");
+    const selectFirst10Btn = document.getElementById("bulk-select-first-10-btn");
+    const selectFirst25Btn = document.getElementById("bulk-select-first-25-btn");
+    const searchInput = document.getElementById("bulk-search-input");
+    const items = Array.from(document.querySelectorAll(".bulk-scan-item"));
+    const checkboxes = Array.from(document.querySelectorAll(".bulk-scan-checkbox"));
+    const selectionCountEl = document.getElementById("bulk-selection-count");
+    const progressWrap = document.getElementById("bulk-scan-progress");
+    const messageEl = document.getElementById("bulk-scan-message");
+    const statsEl = document.getElementById("bulk-scan-stats");
+    let pollTimer = null;
+
+    function selectedKeys() {
+      return checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+    }
+
+    function updateSelectionCount() {
+      selectionCountEl.textContent = `${selectedKeys().length} selected`;
+    }
+
+    function visibleItems() {
+      return items.filter((item) => !item.hidden);
+    }
+
+    function applyTextFilter() {
+      const q = (searchInput.value || "").trim().toLowerCase();
+      items.forEach((item) => {
+        const title = item.dataset.showTitle || "";
+        item.hidden = Boolean(q) && !title.includes(q);
+      });
+      updateSelectionCount();
+    }
+
+    function selectByPredicate(predicate) {
+      checkboxes.forEach((cb) => {
+        if (predicate(cb)) cb.checked = true;
+      });
+      updateSelectionCount();
+    }
+
+    function clearByPredicate(predicate) {
+      checkboxes.forEach((cb) => {
+        if (predicate(cb)) cb.checked = false;
+      });
+      updateSelectionCount();
+    }
+
+    function selectFirstVisible(limit) {
+      let count = 0;
+      visibleItems().forEach((item) => {
+        const cb = item.querySelector(".bulk-scan-checkbox");
+        if (!cb || cb.disabled) return;
+        if (count < limit) {
+          cb.checked = true;
+          count += 1;
+        }
+      });
+      updateSelectionCount();
+    }
+
+    function setDisabled(disabled) {
+      startBtn.disabled = disabled;
+      checkboxes.forEach((cb) => {
+        cb.disabled = disabled;
+      });
+      selectAllBtn.disabled = disabled;
+      clearAllBtn.disabled = disabled;
+    }
+
+    function renderState(state) {
+      const scanned = Number(state.scanned || 0);
+      const total = Number(state.total || 0);
+      const matched = Number(state.matched || 0);
+      const saved = Number(state.saved_candidates || 0);
+      const failed = Number(state.failed || 0);
+      progressWrap.hidden = false;
+      messageEl.textContent = state.message || "Bulk scan in progress...";
+      statsEl.textContent = `Progress: ${scanned}/${total} | Matched: ${matched} | Saved: ${saved} | Failed: ${failed}`;
+      setDisabled(Boolean(state.running));
+      startBtn.textContent = state.running ? "Bulk Scan Running..." : "Start Bulk Scan";
+    }
+
+    async function fetchStatus() {
+      const response = await fetch("{{ url_for('shows.bulk_find_candidates_status') }}");
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) return null;
+      return payload.state || null;
+    }
+
+    async function pollStatus() {
+      try {
+        const state = await fetchStatus();
+        if (!state) return;
+        renderState(state);
+        if (!state.running && pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } catch (err) {
+        console.warn("[Plex ATM] Failed to fetch bulk-scan status.", err);
+      }
+    }
+
+    startBtn.addEventListener("click", async function () {
+      const keys = selectedKeys();
+      if (!keys.length) {
+        messageEl.textContent = "Select at least one show.";
+        progressWrap.hidden = false;
+        return;
+      }
+      setDisabled(true);
+      try {
+        const response = await fetch("{{ url_for('shows.start_bulk_find_candidates') }}", {
+          method: "POST",
+          headers: {
+            "X-Requested-With": "fetch",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ selected_rating_keys: keys }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          progressWrap.hidden = false;
+          messageEl.textContent = payload.message || "Failed to start bulk scan.";
+          setDisabled(false);
+          return;
+        }
+        renderState(payload.state || {});
+        if (!pollTimer) {
+          pollTimer = setInterval(pollStatus, 1500);
+        }
+      } catch (err) {
+        progressWrap.hidden = false;
+        messageEl.textContent = `Failed to start bulk scan: ${err.message || err}`;
+        setDisabled(false);
+      }
+    });
+
+    selectAllBtn.addEventListener("click", function () {
+      checkboxes.forEach((cb) => {
+        cb.checked = true;
+      });
+      updateSelectionCount();
+    });
+
+    clearAllBtn.addEventListener("click", function () {
+      checkboxes.forEach((cb) => {
+        cb.checked = false;
+      });
+      updateSelectionCount();
+    });
+
+    selectZeroCandidatesBtn.addEventListener("click", function () {
+      selectByPredicate((cb) => Number(cb.dataset.candidateCount || 0) === 0);
+    });
+
+    selectNoAnimeThemesBtn.addEventListener("click", function () {
+      selectByPredicate((cb) => Number(cb.dataset.animethemesCount || 0) === 0);
+    });
+
+    selectVisibleBtn.addEventListener("click", function () {
+      selectByPredicate((cb) => {
+        const row = cb.closest(".bulk-scan-item");
+        return Boolean(row) && !row.hidden;
+      });
+    });
+
+    clearVisibleBtn.addEventListener("click", function () {
+      clearByPredicate((cb) => {
+        const row = cb.closest(".bulk-scan-item");
+        return Boolean(row) && !row.hidden;
+      });
+    });
+
+    selectFirst10Btn.addEventListener("click", function () {
+      selectFirstVisible(10);
+    });
+
+    selectFirst25Btn.addEventListener("click", function () {
+      selectFirstVisible(25);
+    });
+
+    searchInput.addEventListener("input", applyTextFilter);
+    checkboxes.forEach((cb) => cb.addEventListener("change", updateSelectionCount));
+    updateSelectionCount();
+    applyTextFilter();
+    pollStatus();
+  })();
+</script>
+{% endblock %}

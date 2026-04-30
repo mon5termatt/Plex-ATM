@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 import json
 import os
+import threading
+import time
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 
@@ -14,6 +16,29 @@ from src.services.theme_apply_service import ThemeApplyService
 
 
 shows_bp = Blueprint("shows", __name__)
+_bulk_scan_lock = threading.Lock()
+_bulk_scan_state: dict = {
+    "running": False,
+    "total": 0,
+    "scanned": 0,
+    "matched": 0,
+    "saved_candidates": 0,
+    "failed": 0,
+    "current_title": "",
+    "started_at": "",
+    "finished_at": "",
+    "message": "",
+}
+
+
+def _bulk_state_snapshot() -> dict:
+    with _bulk_scan_lock:
+        return dict(_bulk_scan_state)
+
+
+def _bulk_state_update(**kwargs) -> None:
+    with _bulk_scan_lock:
+        _bulk_scan_state.update(kwargs)
 
 
 def _services():
@@ -272,6 +297,21 @@ def list_shows():
     start = (page - 1) * page_size
     end = start + page_size
     shows = enriched[start:end]
+    candidate_counts: dict[str, int] = {}
+    rating_keys = [str(s.get("rating_key", "") or "") for s in shows if s.get("rating_key")]
+    if rating_keys:
+        placeholders = ",".join("?" for _ in rating_keys)
+        with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+            rows = conn.execute(
+                f"SELECT show_rating_key, COUNT(*) AS c FROM theme_candidates "
+                f"WHERE show_rating_key IN ({placeholders}) GROUP BY show_rating_key",
+                tuple(rating_keys),
+            ).fetchall()
+        candidate_counts = {str(r["show_rating_key"]): int(r["c"] or 0) for r in rows}
+    for show in shows:
+        show["candidate_count"] = candidate_counts.get(str(show.get("rating_key", "")), 0)
+
+    bulk_scan_results = svc["settings"].get("last_bulk_scan_results", {}) or {}
     return render_template(
         "shows.html",
         shows=shows,
@@ -287,6 +327,7 @@ def list_shows():
         total_pages=total_pages,
         has_prev=page > 1,
         has_next=page < total_pages,
+        bulk_scan_results=bulk_scan_results,
     )
 
 
@@ -339,6 +380,291 @@ def rescan_shows():
         _append_debug_log(svc["settings"], f"Plex rescan failed: {exc}")
         flash(f"Rescan failed: {exc}", "error")
     return redirect(url_for("shows.list_shows"))
+
+
+@shows_bp.route("/shows/bulk-find-candidates", methods=["POST"])
+def bulk_find_candidates():
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": False, "message": "Use /shows/bulk-find-candidates/start for live progress."}), 400
+
+    svc = _services()
+    library_key = svc["settings"].get("library_key", "")
+    if not library_key:
+        flash("Configure and select a Plex library in Settings first.", "error")
+        return redirect(url_for("settings.settings"))
+
+    shows = svc["cache"].get_cached_shows_filtered(library_key, query="")
+    search_overrides = svc["settings"].get("show_search_overrides", {}) or {}
+    scanned = 0
+    with_candidates = 0
+    saved_candidates = 0
+    failed = 0
+    no_candidates_titles: list[str] = []
+    failed_titles: list[str] = []
+
+    for row in shows:
+        rating_key = str(row["rating_key"])
+        title = str(row["title"] or "").strip()
+        raw_query = str(search_overrides.get(rating_key, title) or title).strip()
+        search_query = AnimeThemesClient.to_romaji_query(raw_query) or raw_query
+        if not search_query:
+            continue
+        scanned += 1
+        try:
+            candidates = svc["anime"].search_themes(search_query)
+            with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+                conn.execute(
+                    "DELETE FROM theme_candidates WHERE show_rating_key = ? AND source = 'animethemes'",
+                    (rating_key,),
+                )
+                for candidate in candidates:
+                    conn.execute(
+                        "INSERT INTO theme_candidates(show_rating_key, source, label, audio_url, meta_json, cached_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            rating_key,
+                            candidate["source"],
+                            candidate["label"],
+                            candidate["audio_url"],
+                            candidate["meta_json"],
+                            candidate["cached_at"],
+                        ),
+                    )
+                conn.commit()
+            if candidates:
+                with_candidates += 1
+                saved_candidates += len(candidates)
+            else:
+                no_candidates_titles.append(title)
+                _append_debug_log(
+                    svc["settings"],
+                    f"Bulk candidate scan found none for '{title}' query='{search_query}'",
+                )
+        except Exception as exc:
+            failed += 1
+            failed_titles.append(title)
+            _append_debug_log(
+                svc["settings"],
+                f"Bulk candidate scan failed for '{title}' query='{search_query}': {exc}",
+            )
+
+    svc["settings"].set(
+        "last_bulk_scan_results",
+        {
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+            "scanned": scanned,
+            "matched": with_candidates,
+            "saved_candidates": saved_candidates,
+            "failed": failed,
+            "no_candidates_titles": no_candidates_titles[:200],
+            "failed_titles": failed_titles[:200],
+        },
+    )
+
+    flash(
+        f"Bulk scan complete. Scanned {scanned} shows, matched {with_candidates}, "
+        f"saved {saved_candidates} candidates, failed {failed}.",
+        "success" if failed == 0 else "error",
+    )
+    return redirect(url_for("shows.list_shows"))
+
+
+def _run_bulk_scan_job(app, selected_rating_keys: list[str] | None = None) -> None:
+    with app.app_context():
+        svc = _services()
+        library_key = svc["settings"].get("library_key", "")
+        shows = svc["cache"].get_cached_shows_filtered(library_key, query="") if library_key else []
+        if selected_rating_keys:
+            selected_set = {str(v) for v in selected_rating_keys}
+            shows = [row for row in shows if str(row["rating_key"]) in selected_set]
+        search_overrides = svc["settings"].get("show_search_overrides", {}) or {}
+
+        total = len(shows)
+        scanned = 0
+        with_candidates = 0
+        saved_candidates = 0
+        failed = 0
+        no_candidates_titles: list[str] = []
+        failed_titles: list[str] = []
+
+        _bulk_state_update(
+            running=True,
+            total=total,
+            scanned=0,
+            matched=0,
+            saved_candidates=0,
+            failed=0,
+            current_title="",
+            started_at=datetime.now(timezone.utc).isoformat(),
+            finished_at="",
+            message="Bulk scan started.",
+        )
+
+        for row in shows:
+            rating_key = str(row["rating_key"])
+            title = str(row["title"] or "").strip()
+            raw_query = str(search_overrides.get(rating_key, title) or title).strip()
+            search_query = AnimeThemesClient.to_romaji_query(raw_query) or raw_query
+            if not search_query:
+                continue
+
+            _bulk_state_update(current_title=title)
+            scanned += 1
+            try:
+                candidates, debug = svc["anime"].search_themes_with_debug(search_query)
+                attempts = debug.get("attempts", [])
+                with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+                    conn.execute(
+                        "DELETE FROM theme_candidates WHERE show_rating_key = ? AND source = 'animethemes'",
+                        (rating_key,),
+                    )
+                    for candidate in candidates:
+                        conn.execute(
+                            "INSERT INTO theme_candidates(show_rating_key, source, label, audio_url, meta_json, cached_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                rating_key,
+                                candidate["source"],
+                                candidate["label"],
+                                candidate["audio_url"],
+                                candidate["meta_json"],
+                                candidate["cached_at"],
+                            ),
+                        )
+                    conn.commit()
+                if candidates:
+                    with_candidates += 1
+                    saved_candidates += len(candidates)
+                else:
+                    no_candidates_titles.append(title)
+                    _append_debug_log(
+                        svc["settings"],
+                        f"Bulk candidate scan found none for '{title}' query='{search_query}'",
+                    )
+
+                # Be extra conservative near server limits.
+                remaining_values = []
+                for attempt in attempts:
+                    remaining = attempt.get("rate_limit_remaining")
+                    if remaining is None:
+                        continue
+                    try:
+                        remaining_values.append(int(str(remaining)))
+                    except ValueError:
+                        continue
+                if remaining_values and min(remaining_values) <= 2:
+                    time.sleep(2.0)
+                else:
+                    time.sleep(0.15)
+            except Exception as exc:
+                failed += 1
+                failed_titles.append(title)
+                _append_debug_log(
+                    svc["settings"],
+                    f"Bulk candidate scan failed for '{title}' query='{search_query}': {exc}",
+                )
+
+            _bulk_state_update(
+                scanned=scanned,
+                matched=with_candidates,
+                saved_candidates=saved_candidates,
+                failed=failed,
+                message=f"Scanning {scanned}/{total}: {title}",
+            )
+
+        final_message = (
+            f"Bulk scan complete. Scanned {scanned} shows, matched {with_candidates}, "
+            f"saved {saved_candidates} candidates, failed {failed}."
+        )
+        svc["settings"].set(
+            "last_bulk_scan_results",
+            {
+                "ran_at": datetime.now(timezone.utc).isoformat(),
+                "scanned": scanned,
+                "matched": with_candidates,
+                "saved_candidates": saved_candidates,
+                "failed": failed,
+                "no_candidates_titles": no_candidates_titles[:200],
+                "failed_titles": failed_titles[:200],
+            },
+        )
+        _bulk_state_update(
+            running=False,
+            current_title="",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            message=final_message,
+        )
+
+
+@shows_bp.route("/shows/bulk-find-candidates/start", methods=["POST"])
+def start_bulk_find_candidates():
+    svc = _services()
+    library_key = svc["settings"].get("library_key", "")
+    if not library_key:
+        return jsonify({"ok": False, "message": "Configure and select a Plex library in Settings first."}), 400
+
+    state = _bulk_state_snapshot()
+    if state.get("running"):
+        return jsonify({"ok": False, "message": "Bulk scan already running.", "state": state}), 409
+
+    selected_rating_keys = request.form.getlist("selected_rating_keys")
+    if not selected_rating_keys and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        selected_rating_keys = [str(v) for v in payload.get("selected_rating_keys", []) if str(v).strip()]
+
+    app = current_app._get_current_object()
+    worker = threading.Thread(target=_run_bulk_scan_job, args=(app, selected_rating_keys), daemon=True)
+    worker.start()
+    return jsonify({"ok": True, "message": "Bulk scan started.", "state": _bulk_state_snapshot()})
+
+
+@shows_bp.route("/shows/bulk-find-candidates/status")
+def bulk_find_candidates_status():
+    return jsonify({"ok": True, "state": _bulk_state_snapshot()})
+
+
+@shows_bp.route("/shows/bulk-scan")
+def bulk_scan_page():
+    svc = _services()
+    library_key = svc["settings"].get("library_key", "")
+    if not library_key:
+        flash("Configure Plex and select a TV library in Settings first.", "error")
+        return redirect(url_for("settings.settings"))
+
+    shows = svc["cache"].get_cached_shows_filtered(library_key, query="")
+    rating_keys = [str(s["rating_key"]) for s in shows]
+    candidate_counts: dict[str, int] = {}
+    animethemes_counts: dict[str, int] = {}
+    if rating_keys:
+        placeholders = ",".join("?" for _ in rating_keys)
+        with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+            rows = conn.execute(
+                f"SELECT show_rating_key, COUNT(*) AS c FROM theme_candidates "
+                f"WHERE show_rating_key IN ({placeholders}) GROUP BY show_rating_key",
+                tuple(rating_keys),
+            ).fetchall()
+            animethemes_rows = conn.execute(
+                f"SELECT show_rating_key, COUNT(*) AS c FROM theme_candidates "
+                f"WHERE source = 'animethemes' AND show_rating_key IN ({placeholders}) GROUP BY show_rating_key",
+                tuple(rating_keys),
+            ).fetchall()
+        candidate_counts = {str(r["show_rating_key"]): int(r["c"] or 0) for r in rows}
+        animethemes_counts = {str(r["show_rating_key"]): int(r["c"] or 0) for r in animethemes_rows}
+
+    enriched = []
+    trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
+    for row in shows:
+        show = dict(row)
+        show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
+        show["candidate_count"] = candidate_counts.get(str(show["rating_key"]), 0)
+        show["animethemes_count"] = animethemes_counts.get(str(show["rating_key"]), 0)
+        enriched.append(show)
+
+    return render_template(
+        "bulk_scan.html",
+        shows=enriched,
+        bulk_scan_results=svc["settings"].get("last_bulk_scan_results", {}) or {},
+    )
 
 
 @shows_bp.route("/shows/<rating_key>")
