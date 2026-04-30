@@ -964,6 +964,76 @@ def find_candidates(rating_key: str):
     return redirect(url_for("shows.show_detail", rating_key=rating_key, **list_state))
 
 
+@shows_bp.route("/shows/<rating_key>/quick-scan", methods=["POST"])
+def quick_scan_show(rating_key: str):
+    svc = _services()
+    with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+        show = conn.execute(
+            "SELECT rating_key, title FROM plex_shows_cache WHERE rating_key = ?",
+            (rating_key,),
+        ).fetchone()
+    if not show:
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": False, "message": "Show missing from cache."}), 404
+        flash("Show missing from cache.", "error")
+        return redirect(url_for("shows.list_shows", **_normalized_list_state(request.form)))
+
+    search_overrides = svc["settings"].get("show_search_overrides", {}) or {}
+    url_overrides = svc["settings"].get("show_animethemes_url_overrides", {}) or {}
+    url_override = str(url_overrides.get(rating_key, "") or "").strip()
+    derived_query = _query_from_animethemes_url(url_override)
+    raw_query = str(search_overrides.get(rating_key, show["title"]) or show["title"]).strip()
+    search_query_seed = derived_query or raw_query
+    search_query = AnimeThemesClient.to_romaji_query(search_query_seed) or search_query_seed
+
+    try:
+        candidates = svc["anime"].search_themes(search_query)
+        with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+            conn.execute(
+                "DELETE FROM theme_candidates WHERE show_rating_key = ? AND source = 'animethemes'",
+                (rating_key,),
+            )
+            for candidate in candidates:
+                conn.execute(
+                    "INSERT INTO theme_candidates(show_rating_key, source, label, audio_url, meta_json, cached_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        rating_key,
+                        candidate["source"],
+                        candidate["label"],
+                        candidate["audio_url"],
+                        candidate["meta_json"],
+                        candidate["cached_at"],
+                    ),
+                )
+            conn.commit()
+            show_row = conn.execute(
+                "SELECT folder_path FROM plex_shows_cache WHERE rating_key = ?",
+                (rating_key,),
+            ).fetchone()
+        has_current_theme = False
+        if show_row:
+            resolved_folder = _resolve_existing_show_folder_path(svc, show_row["folder_path"])
+            has_current_theme = bool(_find_theme_file_in_show_folder(resolved_folder))
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": f"Quick scan complete for '{show['title']}'. Saved {len(candidates)} candidates.",
+                    "rating_key": rating_key,
+                    "candidate_count": len(candidates),
+                    "has_current_theme": has_current_theme,
+                }
+            )
+        flash(f"Quick scan complete for '{show['title']}'. Saved {len(candidates)} candidates.", "success")
+    except Exception as exc:
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"ok": False, "message": f"Quick scan failed for '{show['title']}': {exc}"}), 500
+        flash(f"Quick scan failed for '{show['title']}': {exc}", "error")
+
+    return redirect(url_for("shows.list_shows", **_normalized_list_state(request.form)))
+
+
 @shows_bp.route("/shows/<rating_key>/apply", methods=["POST"])
 def apply_candidate(rating_key: str):
     candidate_id = request.form.get("candidate_id", "").strip()

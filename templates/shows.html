@@ -39,7 +39,7 @@
   {% if view_mode == "grid" %}
   <section class="show-grid">
     {% for show in shows %}
-    <article class="card show-grid-card">
+    <article class="card show-grid-card" data-rating-key="{{ show.rating_key }}">
       <a href="{{ url_for('shows.show_detail', rating_key=show.rating_key) }}" class="show-grid-poster-link">
         {% if show.poster_url %}
           <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-grid" loading="lazy">
@@ -48,7 +48,7 @@
         {% endif %}
       </a>
       <h3 class="show-grid-title">{{ show.title }}</h3>
-      <p class="muted-text show-grid-meta">{{ show.year or "-" }} | Candidates: {{ show.candidate_count }}</p>
+      <p class="muted-text show-grid-meta">{{ show.year or "-" }} | Candidates: <span class="candidate-count-value">{{ show.candidate_count }}</span></p>
       <div class="show-grid-buttons">
         {% if show.has_current_theme %}
           <button
@@ -60,9 +60,22 @@
             Play Current Theme
           </button>
         {% else %}
-          <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
-            No Theme File
-          </button>
+          {% if show.candidate_count == 0 %}
+            <form method="post" action="{{ url_for('shows.quick_scan_show', rating_key=show.rating_key) }}" class="quick-scan-form" data-rating-key="{{ show.rating_key }}" data-show-title="{{ show.title }}">
+              <input type="hidden" name="q" value="{{ q }}">
+              <input type="hidden" name="theme_filter" value="{{ theme_filter }}">
+              <input type="hidden" name="sort_by" value="{{ sort_by }}">
+              <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <input type="hidden" name="page_size" value="{{ page_size }}">
+              <input type="hidden" name="view" value="{{ view_mode }}">
+              <button type="submit" class="secondary-btn play-current-theme-btn">Quick Scan</button>
+            </form>
+          {% else %}
+            <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
+              No Theme File
+            </button>
+          {% endif %}
         {% endif %}
         <a class="action-link-btn" href="{{ url_for('shows.show_detail', rating_key=show.rating_key, q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size, view=view_mode) }}">
           Manage Theme
@@ -74,7 +87,7 @@
   {% else %}
   <table class="card table">
     <thead>
-      <tr>
+      <tr data-rating-key="{{ show.rating_key }}">
         <th>Poster</th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc'), view=view_mode) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc'), view=view_mode) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
@@ -97,7 +110,7 @@
         <td>{{ show.title }}</td>
         <td>{{ show.year or "-" }}</td>
         <td>{{ show.folder_path }}</td>
-        <td>{{ show.candidate_count }}</td>
+        <td class="table-candidate-count">{{ show.candidate_count }}</td>
         <td>
           {% if show.has_current_theme %}
             <button
@@ -109,9 +122,22 @@
               Play Current Theme
             </button>
           {% else %}
-            <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
-              No Theme File
-            </button>
+            {% if show.candidate_count == 0 %}
+              <form method="post" action="{{ url_for('shows.quick_scan_show', rating_key=show.rating_key) }}" class="quick-scan-form" data-rating-key="{{ show.rating_key }}" data-show-title="{{ show.title }}">
+                <input type="hidden" name="q" value="{{ q }}">
+                <input type="hidden" name="theme_filter" value="{{ theme_filter }}">
+                <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+                <input type="hidden" name="page" value="{{ page }}">
+                <input type="hidden" name="page_size" value="{{ page_size }}">
+                <input type="hidden" name="view" value="{{ view_mode }}">
+                <button type="submit" class="secondary-btn play-current-theme-btn">Quick Scan</button>
+              </form>
+            {% else %}
+              <button type="button" class="secondary-btn play-current-theme-btn inactive-btn" disabled>
+                No Theme File
+              </button>
+            {% endif %}
           {% endif %}
         </td>
         <td>
@@ -268,6 +294,65 @@
       progress.value = "0";
       time.textContent = "0:00 / 0:00";
       playerWrap.hidden = true;
+    });
+  })();
+
+  (function () {
+    const quickScanForms = document.querySelectorAll(".quick-scan-form");
+    if (!quickScanForms.length) return;
+
+    function updateShowCandidateCount(ratingKey, candidateCount) {
+      const gridCard = document.querySelector(`.show-grid-card[data-rating-key="${ratingKey}"]`);
+      if (gridCard) {
+        const countEl = gridCard.querySelector(".candidate-count-value");
+        if (countEl) countEl.textContent = String(candidateCount);
+      }
+      const tableRow = document.querySelector(`tr[data-rating-key="${ratingKey}"]`);
+      if (tableRow) {
+        const countEl = tableRow.querySelector(".table-candidate-count");
+        if (countEl) countEl.textContent = String(candidateCount);
+      }
+    }
+
+    function replaceWithNoThemeButton(form) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary-btn play-current-theme-btn inactive-btn";
+      btn.disabled = true;
+      btn.textContent = "No Theme File";
+      form.replaceWith(btn);
+    }
+
+    quickScanForms.forEach((form) => {
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const submitBtn = form.querySelector("button[type='submit']");
+        if (!submitBtn) return;
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Scanning...";
+        try {
+          const response = await fetch(form.action, {
+            method: "POST",
+            body: new FormData(form),
+            headers: {
+              "X-Requested-With": "fetch",
+              "Accept": "application/json",
+            },
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.message || "Quick scan failed.");
+          }
+          const ratingKey = form.dataset.ratingKey || payload.rating_key;
+          updateShowCandidateCount(ratingKey, Number(payload.candidate_count || 0));
+          replaceWithNoThemeButton(form);
+        } catch (err) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+          console.warn("[Plex ATM] Quick scan failed.", err);
+        }
+      });
     });
   })();
 

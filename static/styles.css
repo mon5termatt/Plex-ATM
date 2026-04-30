@@ -496,6 +496,15 @@ button {
   margin-top: auto;
 }
 
+.show-grid-buttons form {
+  width: 100%;
+  margin: 0;
+}
+
+.show-grid-buttons form .play-current-theme-btn {
+  width: 100%;
+}
+
 .inactive-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
