@@ -17,6 +17,53 @@ class PlexCacheService:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_cached_shows_filtered(self, section_key: str, query: str = "") -> list[dict]:
+        where = "library_section_id = ? AND is_missing = 0"
+        params: list = [section_key]
+        q = (query or "").strip()
+        if q:
+            where += " AND (title LIKE ? OR folder_path LIKE ?)"
+            like = f"%{q}%"
+            params.extend([like, like])
+        with get_conn(self.database_path) as conn:
+            rows = conn.execute(
+                f"SELECT rating_key, title, year, folder_path, library_section_id, cached_at, last_seen_at, is_missing "
+                f"FROM plex_shows_cache WHERE {where} ORDER BY title COLLATE NOCASE",
+                tuple(params),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_cached_shows_page(
+        self,
+        section_key: str,
+        query: str = "",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict], int]:
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 200))
+        offset = (page - 1) * page_size
+        where = "library_section_id = ? AND is_missing = 0"
+        params: list = [section_key]
+        q = (query or "").strip()
+        if q:
+            where += " AND (title LIKE ? OR folder_path LIKE ?)"
+            like = f"%{q}%"
+            params.extend([like, like])
+
+        with get_conn(self.database_path) as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM plex_shows_cache WHERE {where}",
+                tuple(params),
+            ).fetchone()["c"]
+            rows = conn.execute(
+                f"SELECT rating_key, title, year, folder_path, library_section_id, cached_at, last_seen_at, is_missing "
+                f"FROM plex_shows_cache WHERE {where} "
+                "ORDER BY title COLLATE NOCASE LIMIT ? OFFSET ?",
+                tuple(params + [page_size, offset]),
+            ).fetchall()
+        return [dict(r) for r in rows], int(total)
+
     @staticmethod
     def _normalize_title(value: str) -> str:
         return "".join(ch.lower() for ch in value if ch.isalnum())

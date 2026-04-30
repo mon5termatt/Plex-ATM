@@ -83,11 +83,32 @@ def _resolve_write_folder(svc: dict, folder_path: str) -> str:
     return os.path.join(override_root, leaf)
 
 
+def _apply_runtime_path_mappings(path: str) -> str:
+    raw = (path or "").strip()
+    mapping_spec = os.environ.get("APP_PATH_MAPPINGS", "").strip()
+    if not raw or not mapping_spec:
+        return raw
+    mapped = raw
+    for rule in mapping_spec.split(";"):
+        rule = rule.strip()
+        if not rule or "=" not in rule:
+            continue
+        src, dst = rule.split("=", 1)
+        src = src.strip().rstrip("/")
+        dst = dst.strip().rstrip("/")
+        if not src or not dst:
+            continue
+        if mapped == src or mapped.startswith(src + "/"):
+            mapped = dst + mapped[len(src):]
+            break
+    return mapped
+
+
 def _find_theme_file_in_show_folder(folder_path: str) -> str:
     """
     Check only inside the show's own folder for current theme files.
     """
-    base = str(folder_path or "").strip()
+    base = _apply_runtime_path_mappings(str(folder_path or "").strip())
     if not base:
         return ""
     for filename in ("theme.mp3", "theme.ogg", "theme.m4a", "theme.flac"):
@@ -120,15 +141,76 @@ def home():
 def list_shows():
     svc = _services()
     library_key = svc["settings"].get("library_key", "")
-    shows = svc["cache"].get_cached_shows(library_key) if library_key else []
+    query = request.args.get("q", "").strip()
+    theme_filter = request.args.get("theme_filter", "all").strip().lower()
+    if theme_filter not in {"all", "has", "none"}:
+        theme_filter = "all"
+    sort_by = request.args.get("sort_by", "title").strip().lower()
+    sort_dir = request.args.get("sort_dir", "asc").strip().lower()
+    if sort_by not in {"title", "year", "folder", "has_theme"}:
+        sort_by = "title"
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    try:
+        page = int(request.args.get("page", "1"))
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", "50"))
+    except ValueError:
+        page_size = 50
+    page = max(page, 1)
+    page_size = max(10, min(page_size, 200))
+
+    shows: list[dict] = []
+    total = 0
+    if library_key:
+        shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
+
     enriched = []
     for row in shows:
         show = dict(row)
+        show["folder_path"] = _apply_runtime_path_mappings(show["folder_path"]) or show["folder_path"]
         current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
         show["has_current_theme"] = bool(current_theme_path)
+        if theme_filter == "has" and not show["has_current_theme"]:
+            continue
+        if theme_filter == "none" and show["has_current_theme"]:
+            continue
         enriched.append(show)
-    shows = enriched
-    return render_template("shows.html", shows=shows, library_key=library_key)
+
+    reverse = sort_dir == "desc"
+    if sort_by == "title":
+        enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+    elif sort_by == "year":
+        enriched.sort(key=lambda s: (s.get("year") or 0, (s.get("title") or "").casefold()), reverse=reverse)
+    elif sort_by == "folder":
+        enriched.sort(key=lambda s: (s.get("folder_path") or "").casefold(), reverse=reverse)
+    elif sort_by == "has_theme":
+        enriched.sort(key=lambda s: (1 if s.get("has_current_theme") else 0, (s.get("title") or "").casefold()), reverse=reverse)
+
+    total = len(enriched)
+    total_pages = max(1, (total + page_size - 1) // page_size) if library_key else 1
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    end = start + page_size
+    shows = enriched[start:end]
+    return render_template(
+        "shows.html",
+        shows=shows,
+        library_key=library_key,
+        q=query,
+        theme_filter=theme_filter,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=total_pages,
+        has_prev=page > 1,
+        has_next=page < total_pages,
+    )
 
 
 @shows_bp.route("/shows/rescan", methods=["POST"])
@@ -287,7 +369,7 @@ def play_current_theme(rating_key: str):
         flash("Show not found.", "error")
         return redirect(url_for("shows.list_shows"))
 
-    target_folder = show["folder_path"]
+    target_folder = _apply_runtime_path_mappings(show["folder_path"]) or show["folder_path"]
     trusted_paths = _runtime_trusted_paths(svc)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
         flash("Current theme path is outside trusted library paths.", "error")

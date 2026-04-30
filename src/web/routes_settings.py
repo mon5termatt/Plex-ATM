@@ -65,6 +65,9 @@ def settings():
         sonarr_ok, sonarr_msg = SonarrClient(sonarr_url, sonarr_api_key).validate()
         sonarr_status = {"ok": sonarr_ok, "message": sonarr_msg}
 
+    debug_logs = service.get("debug_logs", [])
+    show_api_debug = service.get("show_api_debug", {})
+
     return render_template(
         "settings.html",
         plex_url=plex_url,
@@ -76,4 +79,6 @@ def settings():
         sonarr_api_key=sonarr_api_key,
         library_root_override=library_root_override,
         sonarr_status=sonarr_status,
+        debug_logs=debug_logs,
+        show_api_debug=show_api_debug,
     )

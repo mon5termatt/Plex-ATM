@@ -14,23 +14,32 @@ body {
   border-bottom: 1px solid #2b3040;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.brand-text h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.brand-text small {
+  color: #9ba7c2;
+  font-size: 11px;
+}
+
 .topbar a {
   color: #9dd8ff;
   margin-left: 16px;
   text-decoration: none;
-}
-
-.debug-toggle {
-  margin-left: 16px;
-  font-size: 13px;
-  color: #c6d0e6;
-}
-
-.debug-toggle input {
-  width: auto;
-  display: inline-block;
-  margin: 0 6px 0 0;
-  vertical-align: middle;
 }
 
 .container {
@@ -93,8 +102,34 @@ button {
   vertical-align: middle;
 }
 
+.sort-link {
+  color: #9dd8ff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
 .muted-text {
   color: #9ba7c2;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 150px 140px;
+  gap: 10px;
+  align-items: end;
+}
+
+.pagination-controls {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.secondary-btn-link {
+  background: #2a3142;
+  border-color: #3c4357;
 }
 
 .play-current-theme-btn {
@@ -275,14 +310,6 @@ button {
   background: #2a3142;
   border-color: #3c4357;
   font-size: 12px;
-}
-
-.debug-panel {
-  display: none;
-}
-
-body.show-debug .debug-panel {
-  display: block;
 }
 
 .inspector-dropdown {

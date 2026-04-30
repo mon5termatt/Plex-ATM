@@ -41,4 +41,17 @@
     <p>Sonarr: {{ "Connected" if sonarr_status.ok else "Not Connected" }}</p>
   {% endif %}
 </section>
+
+<section class="card">
+  <h3>Show Debug</h3>
+  <details class="inspector-dropdown" open>
+    <summary>Recent Debug Logs</summary>
+    <pre>{% if debug_logs %}{% for line in debug_logs|reverse %}{{ line }}
+{% endfor %}{% else %}No debug logs recorded yet.{% endif %}</pre>
+  </details>
+  <details class="inspector-dropdown">
+    <summary>Per-Show API Debug Payloads</summary>
+    <pre>{{ show_api_debug | tojson(indent=2) }}</pre>
+  </details>
+</section>
 {% endblock %}

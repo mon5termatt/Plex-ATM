@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% set next_sort_dir = "desc" if sort_dir == "asc" else "asc" %}
 <section class="row">
   <h2>Cached Plex Shows</h2>
   <form method="post" action="{{ url_for('shows.rescan_shows') }}">
@@ -7,16 +8,32 @@
   </form>
 </section>
 
+<form method="get" action="{{ url_for('shows.list_shows') }}" class="card filter-row">
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="Filter by title or folder path">
+  <select name="theme_filter">
+    <option value="all" {% if theme_filter == "all" %}selected{% endif %}>All shows</option>
+    <option value="has" {% if theme_filter == "has" %}selected{% endif %}>Has theme</option>
+    <option value="none" {% if theme_filter == "none" %}selected{% endif %}>No theme</option>
+  </select>
+  <select name="page_size">
+    {% for size in [25, 50, 100, 200] %}
+      <option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }} / page</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Apply Filter</button>
+</form>
+
 {% if not library_key %}
   <p class="card">Configure Plex and select a TV library in Settings first.</p>
 {% elif shows %}
+  <p class="muted-text">Showing {{ shows|length }} of {{ total }} shows (page {{ page }} / {{ total_pages }}).</p>
   <table class="card table">
     <thead>
       <tr>
-        <th>Title</th>
-        <th>Year</th>
-        <th>Folder</th>
-        <th>Current Theme</th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc')) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc')) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='folder', sort_dir=(next_sort_dir if sort_by == 'folder' else 'asc')) }}">Folder{% if sort_by == 'folder' %} ({{ sort_dir }}){% endif %}</a></th>
+        <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='has_theme', sort_dir=(next_sort_dir if sort_by == 'has_theme' else 'asc')) }}">Current Theme{% if sort_by == 'has_theme' %} ({{ sort_dir }}){% endif %}</a></th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -49,6 +66,21 @@
       {% endfor %}
     </tbody>
   </table>
+  <section class="row card">
+    <div class="pagination-controls">
+      {% if has_prev %}
+        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page-1, page_size=page_size) }}">Previous</a>
+      {% else %}
+        <span class="muted-text">Previous</span>
+      {% endif %}
+      <span>Page {{ page }} of {{ total_pages }}</span>
+      {% if has_next %}
+        <a class="action-link-btn secondary-btn-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, sort_by=sort_by, sort_dir=sort_dir, page=page+1, page_size=page_size) }}">Next</a>
+      {% else %}
+        <span class="muted-text">Next</span>
+      {% endif %}
+    </div>
+  </section>
 {% else %}
   <p class="card">No cached shows yet. Click Rescan Library to populate cache.</p>
 {% endif %}

@@ -100,28 +100,6 @@
   </aside>
 </div>
 
-<section class="card debug-panel">
-  <h3>Show Debug Data</h3>
-  <details class="inspector-dropdown" open>
-    <summary>AnimeThemes Lookup Payload</summary>
-    <pre>{{ api_debug.get("animethemes_lookup", {"info": "No lookup recorded yet for this show."}) | tojson(indent=2) }}</pre>
-  </details>
-
-  <details class="inspector-dropdown">
-    <summary>Plex Metadata Response</summary>
-    <pre>{{ (live_plex if live_plex is not none else {"info": "Plex not configured or unavailable."}) | tojson(indent=2) }}</pre>
-  </details>
-
-  <details class="inspector-dropdown">
-    <summary>Sonarr Matched Series Response</summary>
-    <pre>{{ (live_sonarr if live_sonarr is not none else {"info": "Sonarr not configured or no match found."}) | tojson(indent=2) }}</pre>
-  </details>
-
-  <details class="inspector-dropdown">
-    <summary>Install History</summary>
-    <pre>{{ installs | tojson(indent=2) }}</pre>
-  </details>
-</section>
 <script>
   (function () {
     const input = document.getElementById("search-query-input");

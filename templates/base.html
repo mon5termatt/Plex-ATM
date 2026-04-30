@@ -3,19 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Plex Theme Manager</title>
+  <title>Plex ATM</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <h1>Plex Theme Manager</h1>
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="Plex ATM logo" class="brand-logo">
+      <div class="brand-text">
+        <h1>Plex ATM</h1>
+        <small>Plex Anime Theme Manager</small>
+      </div>
+    </div>
     <nav>
       <a href="{{ url_for('shows.list_shows') }}">Shows</a>
       <a href="{{ url_for('settings.settings') }}">Settings</a>
-      <label class="debug-toggle">
-        <input type="checkbox" id="debug-toggle-input">
-        Show Debug
-      </label>
     </nav>
   </header>
   <main class="container">
@@ -30,22 +32,5 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
-  <script>
-    (function () {
-      const key = "ptf_show_debug";
-      const input = document.getElementById("debug-toggle-input");
-      if (!input) return;
-
-      const enabled = localStorage.getItem(key) === "1";
-      input.checked = enabled;
-      document.body.classList.toggle("show-debug", enabled);
-
-      input.addEventListener("change", function () {
-        const isEnabled = !!input.checked;
-        localStorage.setItem(key, isEnabled ? "1" : "0");
-        document.body.classList.toggle("show-debug", isEnabled);
-      });
-    })();
-  </script>
 </body>
 </html>

@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plex ATM logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2d8cff"/>
+      <stop offset="100%" stop-color="#6e5bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="24" fill="url(#bg)"/>
+  <path d="M44 34h20c20 0 30 9 30 24s-10 24-30 24h-8v12H44V34zm12 36h8c12 0 18-4 18-12s-6-12-18-12h-8v24z" fill="#fff"/>
+  <path d="M32 94h64" stroke="#ffffff" stroke-opacity=".35" stroke-width="4" stroke-linecap="round"/>
+</svg>
