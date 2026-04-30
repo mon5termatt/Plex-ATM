@@ -130,6 +130,10 @@ button {
   align-items: end;
 }
 
+.filter-row > * {
+  min-width: 0;
+}
+
 .pagination-controls {
   width: 100%;
   display: flex;
@@ -497,3 +501,89 @@ button {
   cursor: not-allowed;
 }
 
+@media (max-width: 1000px) {
+  .shows-layout {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .apply-sidebar,
+  .debug-console {
+    position: static;
+    top: auto;
+    max-height: none;
+  }
+
+  .debug-console pre {
+    max-height: 280px;
+  }
+
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .filter-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .view-switch {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .show-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+
+  .table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .pagination-controls {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .token-input-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .token-toggle-btn {
+    width: 100%;
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 750px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .topbar nav {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .topbar a {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 499px) {
+  .show-grid-card {
+    min-height: 0;
+    height: auto;
+  }
+}

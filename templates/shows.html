@@ -266,5 +266,32 @@
       playerWrap.hidden = true;
     });
   })();
+
+  (function () {
+    const grids = document.querySelectorAll(".show-grid");
+    if (!grids.length) return;
+
+    const minCardWidth = 180;
+    const gridGap = 12;
+    const singleColumnMax = 500;
+
+    function applyGridColumns(grid) {
+      const width = grid.clientWidth || window.innerWidth;
+      if (width <= singleColumnMax) {
+        grid.style.gridTemplateColumns = "1fr";
+        return;
+      }
+
+      const columns = Math.max(2, Math.floor((width + gridGap) / (minCardWidth + gridGap)));
+      grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    }
+
+    function updateAllGrids() {
+      grids.forEach(applyGridColumns);
+    }
+
+    updateAllGrids();
+    window.addEventListener("resize", updateAllGrids);
+  })();
 </script>
 {% endblock %}
