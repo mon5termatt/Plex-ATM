@@ -494,8 +494,10 @@
     const applyThemeApplyResult = document.getElementById("apply-theme-apply-result");
     const DETAIL_LOG_MAX = 40;
     let applyThemeInFlight = 0;
-    /** When true, hideApplyThemeProgress keeps the stepper + error UI (no reset) so colors stay after a failed apply. */
+    /** When true, hideApplyThemeProgress keeps the apply panel (no reset) so stepper colors stay after a failed apply. */
     let lastApplyEndedWithError = false;
+    /** When true, same for a successful apply (all-green stepper stays with the log line). */
+    let lastApplyEndedWithSuccess = false;
 
     function clearApplyProgressError() {
       if (!applyThemeProgressError) return;
@@ -587,6 +589,7 @@
     }
 
     function applyStepperFailure(payload) {
+      lastApplyEndedWithSuccess = false;
       lastApplyEndedWithError = true;
       const detail = String((payload && payload.error_detail) || (payload && payload.message) || "").trim();
       const failed = payload && typeof payload.failed_step === "number" ? payload.failed_step : null;
@@ -611,6 +614,7 @@
     }
 
     function showApplyHttpError(msg) {
+      lastApplyEndedWithSuccess = false;
       lastApplyEndedWithError = true;
       applyStepperReset();
       const m = String(msg || "").trim() || "Request failed.";
@@ -636,6 +640,7 @@
       if (payload.type === "done") {
         if (payload.ok) {
           lastApplyEndedWithError = false;
+          lastApplyEndedWithSuccess = true;
           updateApplyStepper(4);
           clearApplyProgressError();
           setApplyProgressStatus("");
@@ -696,6 +701,7 @@
 
     function showApplyThemeProgress() {
       lastApplyEndedWithError = false;
+      lastApplyEndedWithSuccess = false;
       applyThemeInFlight += 1;
       if (pageLog) pageLog.hidden = false;
       if (applyThemeProgress) {
@@ -712,7 +718,7 @@
       applyThemeInFlight = Math.max(0, applyThemeInFlight - 1);
       if (applyThemeInFlight === 0 && applyThemeProgress) {
         applyThemeProgress.removeAttribute("aria-busy");
-        if (lastApplyEndedWithError) {
+        if (lastApplyEndedWithError || lastApplyEndedWithSuccess) {
           applyThemeProgress.hidden = false;
           syncDetailLogVisibility();
           return;
@@ -807,6 +813,12 @@
             });
             return;
           }
+          lastApplyEndedWithError = false;
+          lastApplyEndedWithSuccess = true;
+          updateApplyStepper(4);
+          clearApplyProgressError();
+          setApplyProgressStatus("");
+          setApplyResult("Complete.", "success");
           appendDetailLog(payload.message || "Theme applied.", "success");
           if (payload.local_theme_url && findForm) {
             findForm.dataset.localThemeInitial = "1";
