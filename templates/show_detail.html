@@ -317,6 +317,82 @@
       });
     }
 
+    const precacheAudioHolders = [];
+
+    function collectCandidateThemeAudioUrls(root) {
+      const base = root && root.querySelectorAll ? root : document;
+      const out = [];
+      const seen = new Set();
+      base.querySelectorAll(".candidate-audio source[src]").forEach((s) => {
+        const raw = (s.getAttribute("src") || "").trim();
+        if (!raw) return;
+        let abs;
+        try {
+          abs = new URL(raw, location.href).href;
+        } catch (_) {
+          return;
+        }
+        if (seen.has(abs)) return;
+        seen.add(abs);
+        out.push(abs);
+      });
+      return out;
+    }
+
+    function precacheThemeAudioInBackground(urls, options) {
+      const maxUrls = (options && options.maxUrls) || 24;
+      const maxConcurrent = (options && options.maxConcurrent) || 2;
+      const list = (urls || []).slice(0, maxUrls);
+      if (!list.length) return;
+      let idx = 0;
+      let active = 0;
+
+      function finishOne(a) {
+        const i = precacheAudioHolders.indexOf(a);
+        if (i >= 0) precacheAudioHolders.splice(i, 1);
+        try {
+          a.removeAttribute("src");
+          a.load();
+        } catch (_) {}
+        active--;
+        pump();
+      }
+
+      function startOne(url) {
+        const a = new Audio();
+        precacheAudioHolders.push(a);
+        active++;
+        const done = () => finishOne(a);
+        a.addEventListener("canplaythrough", done, { once: true });
+        a.addEventListener("error", done, { once: true });
+        a.preload = "auto";
+        a.src = url;
+        try {
+          a.load();
+        } catch (_) {
+          done();
+        }
+      }
+
+      function pump() {
+        while (active < maxConcurrent && idx < list.length) {
+          startOne(list[idx++]);
+        }
+      }
+      pump();
+    }
+
+    function scheduleCandidateThemePrecache(root) {
+      const urls = collectCandidateThemeAudioUrls(root);
+      if (!urls.length) return;
+      const run = () => precacheThemeAudioInBackground(urls);
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(run, { timeout: 5000 });
+      } else {
+        setTimeout(run, 300);
+      }
+    }
+
     function initAudioPlayers(scope) {
       const players = (scope || document).querySelectorAll("[data-audio-player]");
       players.forEach((player) => {
@@ -445,6 +521,7 @@
       if (candidatesContainer) {
         candidatesContainer.innerHTML = blocks.join("");
         initAudioPlayers(candidatesContainer);
+        scheduleCandidateThemePrecache(candidatesContainer);
       }
       if (emptyState) {
         emptyState.hidden = blocks.length > 0;
@@ -964,6 +1041,7 @@
 
     initAudioPlayers(document);
     renderPreview();
+    scheduleCandidateThemePrecache(document);
   })();
 </script>
 {% endblock %}
