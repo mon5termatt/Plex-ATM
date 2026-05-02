@@ -499,6 +499,27 @@
     /** When true, same for a successful apply (all-green stepper stays with the log line). */
     let lastApplyEndedWithSuccess = false;
 
+    function applyThemeDebugEnabled() {
+      try {
+        if (sessionStorage.getItem("plexATM_applyDebug") === "0") return false;
+      } catch (_) {}
+      return true;
+    }
+
+    function applyDbg(...args) {
+      if (!applyThemeDebugEnabled()) return;
+      console.log("[Plex ATM apply]", ...args);
+    }
+
+    function applyDbgStepper(where) {
+      if (!applyThemeDebugEnabled()) return;
+      const nodes = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node");
+      const rails = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-rail");
+      const ns = Array.from(nodes).map((n, i) => `${i}:${(n.className || "").trim().replace(/\s+/g, " ")}`);
+      const rs = Array.from(rails).map((r, i) => `${i}:${(r.className || "").trim().replace(/\s+/g, " ")}`);
+      console.log("[Plex ATM apply] stepper @" + where, { nodes: ns, rails: rs });
+    }
+
     function clearApplyProgressError() {
       if (!applyThemeProgressError) return;
       applyThemeProgressError.textContent = "";
@@ -536,6 +557,7 @@
     }
 
     function applyStepperReset() {
+      applyDbg("applyStepperReset()");
       document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node").forEach((node) => {
         node.classList.remove("is-active", "is-done", "is-error");
         node.classList.add("is-pending");
@@ -574,6 +596,7 @@
     }
 
     function updateApplyStepper(completedSteps) {
+      applyDbg("updateApplyStepper", completedSteps);
       const nodes = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node");
       nodes.forEach((node, i) => {
         node.classList.remove("is-pending", "is-active", "is-done", "is-error");
@@ -638,6 +661,7 @@
     function applyProgressFromPayload(payload) {
       if (!payload) return;
       if (payload.type === "done") {
+        applyDbg("NDJSON payload done", { ok: payload.ok, keys: Object.keys(payload) });
         if (payload.ok) {
           lastApplyEndedWithError = false;
           lastApplyEndedWithSuccess = true;
@@ -646,6 +670,7 @@
           setApplyProgressStatus("");
           setApplyResult("Complete.", "success");
         } else {
+          applyDbg("NDJSON done !ok → applyStepperFailure");
           applyStepperFailure(payload);
         }
         return;
@@ -654,6 +679,7 @@
       const total = Number(payload && payload.total_steps);
       const completed = Number(payload && payload.completed_steps);
       if (Number.isFinite(total) && total > 0 && Number.isFinite(completed) && completed >= 0) {
+        applyDbg("NDJSON progress", { completed, total, stage: payload.stage });
         updateApplyStepper(completed);
         setApplyProgressStatus(msg);
         return;
@@ -691,6 +717,7 @@
       }
       const tail = buffer.trim();
       if (tail) {
+        applyDbg("NDJSON tail (no trailing newline)", tail.length, tail.slice(0, 120));
         try {
           const payload = JSON.parse(tail);
           if ((payload.type === "progress" || payload.type === "done") && typeof onProgress === "function") {
@@ -699,6 +726,7 @@
           if (payload.type === "done") lastDone = payload;
         } catch (_) {}
       }
+      applyDbg("readApplyNdjsonStream return", lastDone ? { type: lastDone.type, ok: lastDone.ok } : null);
       return lastDone;
     }
 
@@ -722,23 +750,40 @@
       clearApplyProgressError();
       clearApplyResult();
       setApplyProgressStatus("Preparing…");
+      applyDbg("showApplyThemeProgress", { inFlight: applyThemeInFlight, lastErr: lastApplyEndedWithError, lastOk: lastApplyEndedWithSuccess });
+      applyDbgStepper("after showApplyThemeProgress");
     }
 
     function hideApplyThemeProgress() {
+      const prevFlight = applyThemeInFlight;
       applyThemeInFlight = Math.max(0, applyThemeInFlight - 1);
+      applyDbg("hideApplyThemeProgress enter", {
+        prevFlight,
+        afterDec: applyThemeInFlight,
+        lastErr: lastApplyEndedWithError,
+        lastOk: lastApplyEndedWithSuccess,
+        progressHidden: applyThemeProgress ? applyThemeProgress.hidden : null,
+      });
       if (applyThemeInFlight === 0 && applyThemeProgress) {
         applyThemeProgress.removeAttribute("aria-busy");
         if (lastApplyEndedWithError || lastApplyEndedWithSuccess) {
+          applyDbg("hideApplyThemeProgress → keep panel (terminal success/error), no reset");
           applyThemeProgress.hidden = false;
           syncDetailLogVisibility();
+          applyDbgStepper("after hide (terminal branch)");
           return;
         }
+        applyDbg("hideApplyThemeProgress → hide panel + clear messages (no terminal flags)");
         applyThemeProgress.hidden = true;
         clearApplyProgressError();
         clearApplyResult();
         setApplyProgressStatus("");
+        applyDbgStepper("after hide (non-terminal branch)");
+      } else {
+        applyDbg("hideApplyThemeProgress → skipped inner (inFlight !== 0 or no progress el)");
       }
       syncDetailLogVisibility();
+      applyDbgStepper("after hide (always)");
     }
 
     function appendDetailLog(text, kind) {
@@ -779,6 +824,7 @@
           },
         });
         const ct = (response.headers.get("content-type") || "").toLowerCase();
+        applyDbg("fetch apply response", { ok: response.ok, contentType: ct });
         if (!response.ok) {
           let msg = response.statusText || "Apply failed.";
           if (ct.includes("json") && !ct.includes("ndjson")) {
@@ -791,6 +837,7 @@
           return;
         }
         if (ct.includes("ndjson") || ct.includes("x-ndjson")) {
+          applyDbg("branch: NDJSON stream");
           const lastDone = await readApplyNdjsonStream(response, applyProgressFromPayload);
           if (!lastDone) {
             applyStepperFailure({
@@ -801,8 +848,13 @@
             return;
           }
           if (!lastDone.ok) {
+            applyDbg("try: lastDone.ok falsy, return before post-success sync", lastDone);
             return;
           }
+          applyDbg("try: post-stream success sync (before appendDetailLog)", {
+            lastOk: lastApplyEndedWithSuccess,
+            lastErr: lastApplyEndedWithError,
+          });
           lastApplyEndedWithError = false;
           lastApplyEndedWithSuccess = true;
           updateApplyStepper(4);
@@ -810,10 +862,12 @@
           setApplyProgressStatus("");
           setApplyResult("Complete.", "success");
           appendDetailLog(lastDone.message || "Theme applied.", "success");
+          applyDbgStepper("after post-stream success sync");
           if (lastDone.local_theme_url && findForm) {
             findForm.dataset.localThemeInitial = "1";
           }
         } else {
+          applyDbg("branch: JSON (non-NDJSON)", { contentType: ct });
           let payload = {};
           try {
             payload = await response.json();
@@ -843,6 +897,7 @@
         const m = String(err && err.message ? err.message : err);
         showApplyHttpError(m);
       } finally {
+        applyDbg("submit finally → hideApplyThemeProgress");
         hideApplyThemeProgress();
         if (submitBtn) {
           submitBtn.disabled = false;
