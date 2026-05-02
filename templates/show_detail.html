@@ -689,6 +689,16 @@
         }
         if (done) break;
       }
+      const tail = buffer.trim();
+      if (tail) {
+        try {
+          const payload = JSON.parse(tail);
+          if ((payload.type === "progress" || payload.type === "done") && typeof onProgress === "function") {
+            onProgress(payload);
+          }
+          if (payload.type === "done") lastDone = payload;
+        } catch (_) {}
+      }
       return lastDone;
     }
 
@@ -724,7 +734,6 @@
           return;
         }
         applyThemeProgress.hidden = true;
-        applyStepperReset();
         clearApplyProgressError();
         clearApplyResult();
         setApplyProgressStatus("");
@@ -794,6 +803,12 @@
           if (!lastDone.ok) {
             return;
           }
+          lastApplyEndedWithError = false;
+          lastApplyEndedWithSuccess = true;
+          updateApplyStepper(4);
+          clearApplyProgressError();
+          setApplyProgressStatus("");
+          setApplyResult("Complete.", "success");
           appendDetailLog(lastDone.message || "Theme applied.", "success");
           if (lastDone.local_theme_url && findForm) {
             findForm.dataset.localThemeInitial = "1";
