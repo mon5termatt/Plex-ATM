@@ -248,6 +248,7 @@
 <script id="animethemes-debug-json" type="application/json">{{ api_debug.get("animethemes_lookup", {}) | tojson | safe }}</script>
 <script id="back-to-list-state-json" type="application/json">{{ back_to_list_params | tojson | safe }}</script>
 <script id="show-detail-nav-urls-json" type="application/json">{{ {"all": {"prev": prev_show_url or "", "next": next_show_url or ""}, "noTheme": {"prev": prev_no_theme_show_url or "", "next": next_no_theme_show_url or ""}} | tojson | safe }}</script>
+<script id="show-detail-candidates-json" type="application/json">{{ candidates | tojson | safe }}</script>
 <script>
   (function () {
     const input = document.getElementById("search-query-input");
@@ -337,8 +338,16 @@
       });
       syncArrowNavModeUi();
     }
-    const localThemeInitially = findForm ? findForm.dataset.localThemeInitial === "1" : false;
-    const localThemeUrl = findForm ? (findForm.dataset.localThemeUrl || "") : "";
+    let localThemeInitially = findForm ? findForm.dataset.localThemeInitial === "1" : false;
+    let localThemeUrl = findForm ? (findForm.dataset.localThemeUrl || "") : "";
+    let sidebarCandidates = [];
+    const candidatesSnapshotNode = document.getElementById("show-detail-candidates-json");
+    if (candidatesSnapshotNode && candidatesSnapshotNode.textContent) {
+      try {
+        const parsed = JSON.parse(candidatesSnapshotNode.textContent);
+        if (Array.isArray(parsed)) sidebarCandidates = parsed;
+      } catch (_) {}
+    }
     const showTitle = findForm ? (findForm.dataset.showTitle || "") : "";
     const base = "{{ animethemes_base_url }}/anime";
     let existingDebugPayload = {};
@@ -809,6 +818,17 @@
       }
     }
 
+    function refreshApplySidebarWithLocalTheme(themeUrl) {
+      if (!themeUrl) return;
+      if (findForm) {
+        findForm.dataset.localThemeInitial = "1";
+        findForm.dataset.localThemeUrl = themeUrl;
+      }
+      localThemeInitially = true;
+      localThemeUrl = themeUrl;
+      renderCandidates(sidebarCandidates, true, localThemeUrl);
+    }
+
     function updateManualSearchLink(query) {
       if (!manualSearchWrap || !manualSearchLink) return;
       const q = String(query || "").trim();
@@ -1221,8 +1241,8 @@
           setApplyResult("Complete.", "success");
           appendDetailLog(lastDone.message || "Theme applied.", "success");
           applyDbgStepper("after post-stream success sync");
-          if (lastDone.local_theme_url && findForm) {
-            findForm.dataset.localThemeInitial = "1";
+          if (lastDone.local_theme_url) {
+            refreshApplySidebarWithLocalTheme(lastDone.local_theme_url);
           }
         } else {
           applyDbg("branch: JSON (non-NDJSON)", { contentType: ct });
@@ -1247,8 +1267,8 @@
           setApplyProgressStatus("");
           setApplyResult("Complete.", "success");
           appendDetailLog(payload.message || "Theme applied.", "success");
-          if (payload.local_theme_url && findForm) {
-            findForm.dataset.localThemeInitial = "1";
+          if (payload.local_theme_url) {
+            refreshApplySidebarWithLocalTheme(payload.local_theme_url);
           }
         }
       } catch (err) {
@@ -1302,6 +1322,15 @@
             statusEl.textContent = payload.message || "Themes updated.";
           }
           const candidates = payload.candidates || [];
+          sidebarCandidates = candidates;
+          if (payload.local_theme_url) {
+            localThemeUrl = payload.local_theme_url;
+            localThemeInitially = true;
+            if (findForm) {
+              findForm.dataset.localThemeUrl = payload.local_theme_url;
+              findForm.dataset.localThemeInitial = "1";
+            }
+          }
           renderCandidates(candidates, Boolean(payload.local_theme_url || localThemeInitially), payload.local_theme_url || localThemeUrl);
           if (!candidates.length) {
             updateManualSearchLink(input ? input.value : "");
@@ -1381,8 +1410,8 @@
             setApplyResult("Complete.", "success");
             appendDetailLog(lastDone.message || "Upload applied.", "success");
             applyDbgStepper("after upload post-stream success sync");
-            if (lastDone.local_theme_url && findForm) {
-              findForm.dataset.localThemeInitial = "1";
+            if (lastDone.local_theme_url) {
+              refreshApplySidebarWithLocalTheme(lastDone.local_theme_url);
             }
           } else {
             applyDbg("branch: upload JSON (non-NDJSON)", { contentType: ct });
@@ -1407,8 +1436,8 @@
             setApplyProgressStatus("");
             setApplyResult("Complete.", "success");
             appendDetailLog(payload.message || "Upload applied.", "success");
-            if (payload.local_theme_url && findForm) {
-              findForm.dataset.localThemeInitial = "1";
+            if (payload.local_theme_url) {
+              refreshApplySidebarWithLocalTheme(payload.local_theme_url);
             }
           }
         } catch (err) {
