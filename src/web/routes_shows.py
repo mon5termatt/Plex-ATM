@@ -5,7 +5,20 @@ import threading
 import time
 from urllib.parse import parse_qs, urlparse
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    stream_with_context,
+    url_for,
+)
 
 from src.db.models import get_conn
 from src.services.animethemes_client import AnimeThemesClient
@@ -259,10 +272,20 @@ def home():
     return redirect(url_for("shows.list_shows"))
 
 
+_SHOWS_LIST_QS_SESSION_KEY = "shows_list_qs"
+_SHOWS_LIST_QS_MAX_LEN = 2000
+
+
 @shows_bp.route("/shows")
 def list_shows():
     svc = _services()
     library_key = svc["settings"].get("library_key", "")
+    if library_key and not request.args:
+        saved_qs = session.get(_SHOWS_LIST_QS_SESSION_KEY)
+        if isinstance(saved_qs, str) and saved_qs.strip():
+            trimmed = saved_qs.strip()[:_SHOWS_LIST_QS_MAX_LEN]
+            return redirect(f"{url_for('shows.list_shows')}?{trimmed}")
+
     query = request.args.get("q", "").strip()
     theme_filter = request.args.get("theme_filter", "all").strip().lower()
     if theme_filter not in {"all", "has", "none"}:
@@ -289,41 +312,79 @@ def list_shows():
 
     shows: list[dict] = []
     total = 0
-    if library_key:
-        shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
     # Fast path for large libraries: don't fetch Sonarr series list during shows index render.
     trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
 
-    enriched = []
-    for row in shows:
-        show = dict(row)
-        show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
-        current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
-        show["has_current_theme"] = bool(current_theme_path)
-        show["poster_url"] = _build_plex_poster_url(svc, show["rating_key"])
-        if theme_filter == "has" and not show["has_current_theme"]:
-            continue
-        if theme_filter == "none" and show["has_current_theme"]:
-            continue
-        enriched.append(show)
+    use_db_page = (
+        library_key
+        and theme_filter == "all"
+        and sort_by in {"title", "year", "folder"}
+    )
 
-    reverse = sort_dir == "desc"
-    if sort_by == "title":
-        enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
-    elif sort_by == "year":
-        enriched.sort(key=lambda s: (s.get("year") or 0, (s.get("title") or "").casefold()), reverse=reverse)
-    elif sort_by == "folder":
-        enriched.sort(key=lambda s: (s.get("folder_path") or "").casefold(), reverse=reverse)
-    elif sort_by == "has_theme":
-        enriched.sort(key=lambda s: (1 if s.get("has_current_theme") else 0, (s.get("title") or "").casefold()), reverse=reverse)
+    if library_key and use_db_page:
+        shows, total = svc["cache"].get_cached_shows_sorted_page(
+            library_key,
+            query=query,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+            shows, total = svc["cache"].get_cached_shows_sorted_page(
+                library_key,
+                query=query,
+                page=page,
+                page_size=page_size,
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+            )
+            total_pages = max(1, (total + page_size - 1) // page_size)
+        enriched = []
+        for row in shows:
+            show = dict(row)
+            show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
+            current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
+            show["has_current_theme"] = bool(current_theme_path)
+            show["poster_url"] = _build_plex_poster_url(svc, show["rating_key"])
+            enriched.append(show)
+        shows = enriched
+    elif library_key:
+        shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
+        enriched = []
+        for row in shows:
+            show = dict(row)
+            show["folder_path"] = _resolve_existing_show_folder_path(svc, show["folder_path"], trusted_roots=trusted_roots)
+            current_theme_path = _find_theme_file_in_show_folder(show["folder_path"])
+            show["has_current_theme"] = bool(current_theme_path)
+            show["poster_url"] = _build_plex_poster_url(svc, show["rating_key"])
+            if theme_filter == "has" and not show["has_current_theme"]:
+                continue
+            if theme_filter == "none" and show["has_current_theme"]:
+                continue
+            enriched.append(show)
 
-    total = len(enriched)
-    total_pages = max(1, (total + page_size - 1) // page_size) if library_key else 1
-    if page > total_pages:
-        page = total_pages
-    start = (page - 1) * page_size
-    end = start + page_size
-    shows = enriched[start:end]
+        reverse = sort_dir == "desc"
+        if sort_by == "title":
+            enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+        elif sort_by == "year":
+            enriched.sort(key=lambda s: (s.get("year") or 0, (s.get("title") or "").casefold()), reverse=reverse)
+        elif sort_by == "folder":
+            enriched.sort(key=lambda s: (s.get("folder_path") or "").casefold(), reverse=reverse)
+        elif sort_by == "has_theme":
+            enriched.sort(key=lambda s: (1 if s.get("has_current_theme") else 0, (s.get("title") or "").casefold()), reverse=reverse)
+
+        total = len(enriched)
+        total_pages = max(1, (total + page_size - 1) // page_size) if library_key else 1
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * page_size
+        end = start + page_size
+        shows = enriched[start:end]
+    else:
+        total_pages = 1
     candidate_counts: dict[str, int] = {}
     rating_keys = [str(s.get("rating_key", "") or "") for s in shows if s.get("rating_key")]
     if rating_keys:
@@ -337,6 +398,9 @@ def list_shows():
         candidate_counts = {str(r["show_rating_key"]): int(r["c"] or 0) for r in rows}
     for show in shows:
         show["candidate_count"] = candidate_counts.get(str(show.get("rating_key", "")), 0)
+
+    if request.query_string:
+        session[_SHOWS_LIST_QS_SESSION_KEY] = request.query_string.decode()[:_SHOWS_LIST_QS_MAX_LEN]
 
     bulk_scan_results = svc["settings"].get("last_bulk_scan_results", {}) or {}
     return render_template(
@@ -1036,6 +1100,7 @@ def quick_scan_show(rating_key: str):
 
 @shows_bp.route("/shows/<rating_key>/apply", methods=["POST"])
 def apply_candidate(rating_key: str):
+    is_fetch = request.headers.get("X-Requested-With") == "fetch"
     candidate_id = request.form.get("candidate_id", "").strip()
     svc = _services()
     with get_conn(current_app.config["DATABASE_PATH"]) as conn:
@@ -1048,15 +1113,66 @@ def apply_candidate(rating_key: str):
             (candidate_id, rating_key),
         ).fetchone()
     if not show or not candidate:
-        flash("Candidate or show not found.", "error")
+        msg = "Candidate or show not found."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 404
+        flash(msg, "error")
+        return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
+    audio_url = str(candidate["audio_url"] or "").strip()
+    if not audio_url:
+        msg = "This candidate has no download URL."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 400
+        flash(msg, "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
     trusted_paths = _runtime_trusted_paths(svc)
     show_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
     target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
-        flash("Target folder is outside trusted Plex library paths.", "error")
+        msg = "Target folder is outside trusted Plex library paths."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 403
+        flash(msg, "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
-    ok, message = svc["apply"].install_from_url(show["rating_key"], target_folder, candidate["audio_url"])
+    if is_fetch:
+
+        def ndjson_stream():
+            for ev in svc["apply"].install_from_url_with_progress(show["rating_key"], target_folder, audio_url):
+                if ev.get("type") == "progress":
+                    row = {
+                        "type": "progress",
+                        "message": ev.get("message", ""),
+                    }
+                    if "completed_steps" in ev:
+                        row["completed_steps"] = ev.get("completed_steps")
+                    if "total_steps" in ev:
+                        row["total_steps"] = ev.get("total_steps")
+                    if ev.get("stage"):
+                        row["stage"] = ev.get("stage")
+                    yield json.dumps(row) + "\n"
+                elif ev.get("type") == "done":
+                    ok_ev = bool(ev.get("ok"))
+                    raw_msg = str(ev.get("message", "") or "")
+                    payload = {
+                        "type": "done",
+                        "ok": ok_ev,
+                        "message": (f"Theme applied: {raw_msg}" if ok_ev else f"Apply failed: {raw_msg}"),
+                    }
+                    if ok_ev:
+                        payload["local_theme_url"] = url_for("shows.play_current_theme", rating_key=rating_key)
+                    else:
+                        payload["error_detail"] = raw_msg
+                    if not ok_ev and isinstance(ev.get("failed_step"), int):
+                        payload["failed_step"] = ev["failed_step"]
+                    yield json.dumps(payload) + "\n"
+
+        return Response(
+            stream_with_context(ndjson_stream()),
+            mimetype="application/x-ndjson",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    ok, message = svc["apply"].install_from_url(show["rating_key"], target_folder, audio_url)
     flash(f"Theme applied: {message}" if ok else f"Apply failed: {message}", "success" if ok else "error")
     return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 

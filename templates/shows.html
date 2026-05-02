@@ -87,7 +87,7 @@
   {% else %}
   <table class="card table">
     <thead>
-      <tr data-rating-key="{{ show.rating_key }}">
+      <tr>
         <th>Poster</th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='title', sort_dir=(next_sort_dir if sort_by == 'title' else 'asc'), view=view_mode) }}">Title{% if sort_by == 'title' %} ({{ sort_dir }}){% endif %}</a></th>
         <th><a class="sort-link" href="{{ url_for('shows.list_shows', q=q, theme_filter=theme_filter, page=1, page_size=page_size, sort_by='year', sort_dir=(next_sort_dir if sort_by == 'year' else 'asc'), view=view_mode) }}">Year{% if sort_by == 'year' %} ({{ sort_dir }}){% endif %}</a></th>
@@ -99,7 +99,7 @@
     </thead>
     <tbody>
       {% for show in shows %}
-      <tr>
+      <tr data-rating-key="{{ show.rating_key }}">
         <td>
           {% if show.poster_url %}
             <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-thumb" loading="lazy">
@@ -188,23 +188,6 @@
   (function () {
     const storageKey = "plex_atm_shows_state";
     const currentUrl = new URL(window.location.href);
-    const hasQuery = currentUrl.searchParams.toString().length > 0;
-
-    if (!hasQuery) {
-      const savedState = localStorage.getItem(storageKey);
-      if (savedState) {
-        try {
-          const parsed = JSON.parse(savedState);
-          const savedParams = new URLSearchParams(parsed);
-          if (savedParams.toString()) {
-            window.location.replace(`${currentUrl.pathname}?${savedParams.toString()}`);
-            return;
-          }
-        } catch (err) {
-          console.warn("[Plex ATM] Failed to restore shows state from localStorage.", err);
-        }
-      }
-    }
 
     const paramsToPersist = ["q", "theme_filter", "sort_by", "sort_dir", "page", "page_size", "view"];
     const state = {};

@@ -1,7 +1,9 @@
 import os
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from typing import Any
 
 import requests
 
@@ -130,19 +132,99 @@ class ThemeApplyService:
             return (False, f"File is not readable: {path}")
         return (True, f"Verified file write: {path} ({size} bytes)")
 
-    def install_from_url(self, show_rating_key: str, folder_path: str, audio_url: str, filename: str = "theme.mp3") -> tuple[bool, str]:
+    def install_from_url_with_progress(
+        self,
+        show_rating_key: str,
+        folder_path: str,
+        audio_url: str,
+        filename: str = "theme.mp3",
+    ) -> Iterator[dict[str, Any]]:
+        """
+        Yields progress dicts with completed_steps / total_steps (0..total = phases done),
+        then exactly one {"type": "done", "ok": bool, "message": str}.
+        """
+        total = 4
         try:
-            response = requests.get(audio_url, timeout=45)
-            response.raise_for_status()
-            mp3_bytes = self._reencode_to_mp3_128k(response.content)
-            path = self._safe_write(folder_path, filename, mp3_bytes)
+            yield {
+                "type": "progress",
+                "stage": "download",
+                "completed_steps": 0,
+                "total_steps": total,
+                "message": "Downloading theme from source…",
+            }
+            try:
+                response = requests.get(audio_url, timeout=45)
+                response.raise_for_status()
+                raw_bytes = response.content
+            except Exception as exc:
+                self._log_install(show_rating_key, "animethemes", folder_path, "failed", str(exc))
+                yield {"type": "done", "ok": False, "message": str(exc), "failed_step": 0}
+                return
+
+            yield {
+                "type": "progress",
+                "stage": "convert",
+                "completed_steps": 1,
+                "total_steps": total,
+                "message": "Converting audio to MP3 (128 kbps)…",
+            }
+            try:
+                mp3_bytes = self._reencode_to_mp3_128k(raw_bytes)
+            except Exception as exc:
+                self._log_install(show_rating_key, "animethemes", folder_path, "failed", str(exc))
+                yield {"type": "done", "ok": False, "message": str(exc), "failed_step": 1}
+                return
+
+            leaf = os.path.basename(os.path.normpath(str(folder_path or "").strip())) or "show folder"
+            yield {
+                "type": "progress",
+                "stage": "write",
+                "completed_steps": 2,
+                "total_steps": total,
+                "message": f"Writing {filename} to “{leaf}”…",
+            }
+            try:
+                path = self._safe_write(folder_path, filename, mp3_bytes)
+            except Exception as exc:
+                self._log_install(show_rating_key, "animethemes", folder_path, "failed", str(exc))
+                yield {"type": "done", "ok": False, "message": str(exc), "failed_step": 2}
+                return
+
+            yield {
+                "type": "progress",
+                "stage": "verify",
+                "completed_steps": 3,
+                "total_steps": total,
+                "message": "Verifying file on disk…",
+            }
             ok, verify_msg = self._verify_written_file(path)
-            status = "success" if ok else "failed"
+            if not ok:
+                self._log_install(show_rating_key, "animethemes", path, "failed", verify_msg)
+                yield {"type": "done", "ok": False, "message": verify_msg, "failed_step": 3}
+                return
+
+            status = "success"
             self._log_install(show_rating_key, "animethemes", path, status, verify_msg)
-            return (ok, verify_msg)
+            yield {
+                "type": "progress",
+                "stage": "finalize",
+                "completed_steps": 4,
+                "total_steps": total,
+                "message": "All install checks finished.",
+            }
+            yield {"type": "done", "ok": True, "message": verify_msg}
         except Exception as exc:
             self._log_install(show_rating_key, "animethemes", folder_path, "failed", str(exc))
-            return (False, str(exc))
+            yield {"type": "done", "ok": False, "message": str(exc), "failed_step": None}
+
+    def install_from_url(self, show_rating_key: str, folder_path: str, audio_url: str, filename: str = "theme.mp3") -> tuple[bool, str]:
+        last: dict[str, Any] | None = None
+        for ev in self.install_from_url_with_progress(show_rating_key, folder_path, audio_url, filename):
+            if ev.get("type") == "done":
+                last = ev
+        if not last:
+            return (False, "Unknown error")
+        return (bool(last.get("ok")), str(last.get("message", "")))
 
     def install_from_upload(self, show_rating_key: str, folder_path: str, uploaded_bytes: bytes, filename: str = "theme.mp3") -> tuple[bool, str]:
         try:

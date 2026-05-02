@@ -1,6 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="shows-layout">
+  <div id="detail-page-log" class="detail-page-log card" hidden aria-live="polite">
+    <div class="detail-page-log-body">
+      <div class="detail-page-log-main">
+        <div id="apply-theme-progress" class="apply-theme-progress" hidden>
+          <div class="apply-theme-stepper-wrap">
+            <div
+              id="apply-theme-stepper"
+              class="apply-theme-stepper"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="4"
+              aria-valuenow="0"
+              aria-valuetext=""
+              aria-label="Theme install steps"
+            >
+              <div class="apply-theme-step-node is-pending" data-step="0">
+                <span class="apply-theme-step-circle" aria-hidden="true"></span>
+                <span class="apply-theme-step-label">Download</span>
+              </div>
+              <div class="apply-theme-step-rail is-pending" data-rail="0" aria-hidden="true">
+                <span class="apply-theme-step-rail-line"></span>
+              </div>
+              <div class="apply-theme-step-node is-pending" data-step="1">
+                <span class="apply-theme-step-circle" aria-hidden="true"></span>
+                <span class="apply-theme-step-label">Convert</span>
+              </div>
+              <div class="apply-theme-step-rail is-pending" data-rail="1" aria-hidden="true">
+                <span class="apply-theme-step-rail-line"></span>
+              </div>
+              <div class="apply-theme-step-node is-pending" data-step="2">
+                <span class="apply-theme-step-circle" aria-hidden="true"></span>
+                <span class="apply-theme-step-label">Write</span>
+              </div>
+              <div class="apply-theme-step-rail is-pending" data-rail="2" aria-hidden="true">
+                <span class="apply-theme-step-rail-line"></span>
+              </div>
+              <div class="apply-theme-step-node is-pending" data-step="3">
+                <span class="apply-theme-step-circle" aria-hidden="true"></span>
+                <span class="apply-theme-step-label">Verify</span>
+              </div>
+            </div>
+          </div>
+          <div class="detail-page-log-text-stack">
+            <div id="apply-theme-progress-status" class="apply-theme-progress-status" aria-live="polite"></div>
+            <div id="apply-theme-apply-result" class="apply-theme-apply-result" hidden aria-live="polite"></div>
+            <p id="apply-theme-progress-error" class="apply-theme-progress-error" hidden></p>
+          </div>
+        </div>
+        <ul id="detail-page-log-list" class="detail-page-log-list"></ul>
+      </div>
+    </div>
+  </div>
   <section class="shows-main">
     <section class="row">
       <div class="show-header">
@@ -129,7 +181,7 @@
           {% else %}
           <p>No preview URL available for this candidate.</p>
           {% endif %}
-          <form method="post" action="{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}">
+          <form class="apply-candidate-form" method="post" action="{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}">
             <input type="hidden" name="candidate_id" value="{{ c.id }}">
             <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
             <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
@@ -381,7 +433,7 @@
                 <span class="audio-time" data-audio-time>0:00 / 0:00</span>
               </div>
             </div>` : `<p>No preview URL available for this candidate.</p>`}
-            <form method="post" action="${esc(applyAction)}">
+            <form class="apply-candidate-form" method="post" action="${esc(applyAction)}">
               <input type="hidden" name="candidate_id" value="${esc(c.id)}">
               ${buildListStateInputs()}
               <button type="submit">Apply This Theme</button>
@@ -432,6 +484,345 @@
     } else {
       console.info("[Plex ATM] No saved AnimeThemes debug payload for this show yet.");
     }
+
+    const pageLog = document.getElementById("detail-page-log");
+    const pageLogList = document.getElementById("detail-page-log-list");
+    const applyThemeProgress = document.getElementById("apply-theme-progress");
+    const applyThemeProgressStatus = document.getElementById("apply-theme-progress-status");
+    const applyThemeStepper = document.getElementById("apply-theme-stepper");
+    const applyThemeProgressError = document.getElementById("apply-theme-progress-error");
+    const applyThemeApplyResult = document.getElementById("apply-theme-apply-result");
+    const DETAIL_LOG_MAX = 40;
+    let applyThemeInFlight = 0;
+    /** When true, hideApplyThemeProgress keeps the stepper + error UI (no reset) so colors stay after a failed apply. */
+    let lastApplyEndedWithError = false;
+
+    function clearApplyProgressError() {
+      if (!applyThemeProgressError) return;
+      applyThemeProgressError.textContent = "";
+      applyThemeProgressError.hidden = true;
+    }
+
+    function clearApplyResult() {
+      if (!applyThemeApplyResult) return;
+      applyThemeApplyResult.textContent = "";
+      applyThemeApplyResult.hidden = true;
+      applyThemeApplyResult.classList.remove("is-success");
+    }
+
+    function setApplyResult(text, tone) {
+      if (!applyThemeApplyResult) return;
+      const t = String(text || "").trim();
+      applyThemeApplyResult.textContent = t;
+      applyThemeApplyResult.hidden = !t;
+      applyThemeApplyResult.classList.remove("is-success");
+      if (tone === "success") applyThemeApplyResult.classList.add("is-success");
+    }
+
+    function showApplyProgressError(text) {
+      if (!applyThemeProgressError) return;
+      const t = String(text || "").trim();
+      applyThemeProgressError.textContent = t;
+      applyThemeProgressError.hidden = !t;
+    }
+
+    function applyRailsReset() {
+      document.querySelectorAll("#apply-theme-stepper .apply-theme-step-rail").forEach((rail) => {
+        rail.classList.remove("is-active", "is-done", "is-error");
+        rail.classList.add("is-pending");
+      });
+    }
+
+    function applyStepperReset() {
+      document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node").forEach((node) => {
+        node.classList.remove("is-active", "is-done", "is-error");
+        node.classList.add("is-pending");
+      });
+      applyRailsReset();
+      if (applyThemeStepper) {
+        applyThemeStepper.setAttribute("aria-valuenow", "0");
+        applyThemeStepper.removeAttribute("aria-valuetext");
+      }
+    }
+
+    function updateApplyRails(completedSteps) {
+      const rails = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-rail");
+      rails.forEach((rail, i) => {
+        rail.classList.remove("is-pending", "is-active", "is-done", "is-error");
+        if (completedSteps > i) rail.classList.add("is-done");
+        else if (completedSteps === i) rail.classList.add("is-active");
+        else rail.classList.add("is-pending");
+      });
+    }
+
+    function updateApplyRailsFromFailure(failed) {
+      const rails = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-rail");
+      const n = rails.length;
+      if (failed === null || failed < 0 || n === 0) {
+        applyRailsReset();
+        return;
+      }
+      const errorRail = Math.min(failed, n - 1);
+      rails.forEach((rail, i) => {
+        rail.classList.remove("is-pending", "is-active", "is-done", "is-error");
+        if (i < errorRail) rail.classList.add("is-done");
+        else if (i === errorRail) rail.classList.add("is-error");
+        else rail.classList.add("is-pending");
+      });
+    }
+
+    function updateApplyStepper(completedSteps) {
+      const nodes = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node");
+      nodes.forEach((node, i) => {
+        node.classList.remove("is-pending", "is-active", "is-done", "is-error");
+        if (completedSteps > i) node.classList.add("is-done");
+        else if (completedSteps === i) node.classList.add("is-active");
+        else node.classList.add("is-pending");
+      });
+      updateApplyRails(completedSteps);
+      if (applyThemeStepper) {
+        const v = Math.min(4, Math.max(0, completedSteps));
+        applyThemeStepper.setAttribute("aria-valuenow", String(v));
+      }
+    }
+
+    function applyStepperFailure(payload) {
+      lastApplyEndedWithError = true;
+      const detail = String((payload && payload.error_detail) || (payload && payload.message) || "").trim();
+      const failed = payload && typeof payload.failed_step === "number" ? payload.failed_step : null;
+      const nodes = document.querySelectorAll("#apply-theme-stepper .apply-theme-step-node");
+      nodes.forEach((node, i) => {
+        node.classList.remove("is-pending", "is-active", "is-done", "is-error");
+        if (failed !== null && failed >= 0 && failed < nodes.length) {
+          if (i < failed) node.classList.add("is-done");
+          else if (i === failed) node.classList.add("is-error");
+          else node.classList.add("is-pending");
+        } else {
+          node.classList.add("is-pending");
+        }
+      });
+      updateApplyRailsFromFailure(failed);
+      setApplyProgressStatus("");
+      setApplyResult("Apply failed.");
+      showApplyProgressError(detail || "Apply failed.");
+      if (applyThemeStepper) {
+        applyThemeStepper.setAttribute("aria-valuetext", detail || "Apply failed.");
+      }
+    }
+
+    function showApplyHttpError(msg) {
+      lastApplyEndedWithError = true;
+      applyStepperReset();
+      const m = String(msg || "").trim() || "Request failed.";
+      setApplyProgressStatus("");
+      setApplyResult("Apply failed.");
+      showApplyProgressError(m);
+      if (applyThemeStepper) {
+        applyThemeStepper.setAttribute("aria-valuetext", m);
+      }
+    }
+
+    function setApplyProgressStatus(text) {
+      const t = String(text || "").trim();
+      if (applyThemeProgressStatus) applyThemeProgressStatus.textContent = t;
+      if (applyThemeStepper) {
+        if (t) applyThemeStepper.setAttribute("aria-valuetext", t);
+        else applyThemeStepper.removeAttribute("aria-valuetext");
+      }
+    }
+
+    function applyProgressFromPayload(payload) {
+      if (!payload) return;
+      if (payload.type === "done") {
+        if (payload.ok) {
+          lastApplyEndedWithError = false;
+          updateApplyStepper(4);
+          clearApplyProgressError();
+          setApplyProgressStatus("");
+          setApplyResult("Complete.", "success");
+        } else {
+          applyStepperFailure(payload);
+        }
+        return;
+      }
+      const msg = String((payload && payload.message) || "").trim();
+      const total = Number(payload && payload.total_steps);
+      const completed = Number(payload && payload.completed_steps);
+      if (Number.isFinite(total) && total > 0 && Number.isFinite(completed) && completed >= 0) {
+        updateApplyStepper(completed);
+        setApplyProgressStatus(msg);
+        return;
+      }
+      setApplyProgressStatus(msg);
+    }
+
+    async function readApplyNdjsonStream(response, onProgress) {
+      const reader = response.body && response.body.getReader();
+      if (!reader) return null;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let lastDone = null;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: !done });
+        for (;;) {
+          const nl = buffer.indexOf("\n");
+          if (nl < 0) break;
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          let payload;
+          try {
+            payload = JSON.parse(line);
+          } catch (_) {
+            continue;
+          }
+          if ((payload.type === "progress" || payload.type === "done") && typeof onProgress === "function") {
+            onProgress(payload);
+          }
+          if (payload.type === "done") lastDone = payload;
+        }
+        if (done) break;
+      }
+      return lastDone;
+    }
+
+    function syncDetailLogVisibility() {
+      if (!pageLog) return;
+      const hasProgress = applyThemeProgress && !applyThemeProgress.hidden;
+      const hasLines = pageLogList && pageLogList.children.length > 0;
+      pageLog.hidden = !hasProgress && !hasLines;
+    }
+
+    function showApplyThemeProgress() {
+      lastApplyEndedWithError = false;
+      applyThemeInFlight += 1;
+      if (pageLog) pageLog.hidden = false;
+      if (applyThemeProgress) {
+        applyThemeProgress.hidden = false;
+        applyThemeProgress.setAttribute("aria-busy", "true");
+      }
+      applyStepperReset();
+      clearApplyProgressError();
+      clearApplyResult();
+      setApplyProgressStatus("Preparing…");
+    }
+
+    function hideApplyThemeProgress() {
+      applyThemeInFlight = Math.max(0, applyThemeInFlight - 1);
+      if (applyThemeInFlight === 0 && applyThemeProgress) {
+        applyThemeProgress.removeAttribute("aria-busy");
+        if (lastApplyEndedWithError) {
+          applyThemeProgress.hidden = false;
+          syncDetailLogVisibility();
+          return;
+        }
+        applyThemeProgress.hidden = true;
+        applyStepperReset();
+        clearApplyProgressError();
+        clearApplyResult();
+        setApplyProgressStatus("");
+      }
+      syncDetailLogVisibility();
+    }
+
+    function appendDetailLog(text, kind) {
+      if (!pageLog || !pageLogList) return;
+      pageLog.hidden = false;
+      const li = document.createElement("li");
+      li.className = kind === "error" ? "is-error" : kind === "success" ? "is-success" : "";
+      const t = new Date();
+      const stamp = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
+      li.textContent = `[${stamp}] ${text}`;
+      pageLogList.insertBefore(li, pageLogList.firstChild);
+      while (pageLogList.children.length > DETAIL_LOG_MAX) {
+        pageLogList.removeChild(pageLogList.lastChild);
+      }
+      syncDetailLogVisibility();
+    }
+
+    document.addEventListener("submit", async (event) => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement)) return;
+      if (!form.classList.contains("apply-candidate-form")) return;
+      event.preventDefault();
+      showApplyThemeProgress();
+      const submitBtn = form.querySelector("button[type='submit']");
+      const originalText = submitBtn ? submitBtn.textContent : "";
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Applying…";
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: {
+            "X-Requested-With": "fetch",
+            Accept: "application/x-ndjson, application/json",
+          },
+        });
+        const ct = (response.headers.get("content-type") || "").toLowerCase();
+        if (!response.ok) {
+          let msg = response.statusText || "Apply failed.";
+          if (ct.includes("json") && !ct.includes("ndjson")) {
+            try {
+              const errBody = await response.json();
+              if (errBody && errBody.message) msg = errBody.message;
+            } catch (_) {}
+          }
+          showApplyHttpError(msg);
+          return;
+        }
+        if (ct.includes("ndjson") || ct.includes("x-ndjson")) {
+          const lastDone = await readApplyNdjsonStream(response, applyProgressFromPayload);
+          if (!lastDone) {
+            applyStepperFailure({
+              error_detail: "No response from server.",
+              message: "",
+              failed_step: null,
+            });
+            return;
+          }
+          if (!lastDone.ok) {
+            return;
+          }
+          appendDetailLog(lastDone.message || "Theme applied.", "success");
+          if (lastDone.local_theme_url && findForm) {
+            findForm.dataset.localThemeInitial = "1";
+          }
+        } else {
+          let payload = {};
+          try {
+            payload = await response.json();
+          } catch (_) {
+            payload = { ok: false, message: response.statusText || "Invalid response" };
+          }
+          if (!payload.ok) {
+            applyStepperFailure({
+              error_detail: String(payload.message || "Apply failed."),
+              message: "",
+              failed_step: null,
+            });
+            return;
+          }
+          appendDetailLog(payload.message || "Theme applied.", "success");
+          if (payload.local_theme_url && findForm) {
+            findForm.dataset.localThemeInitial = "1";
+          }
+        }
+      } catch (err) {
+        const m = String(err && err.message ? err.message : err);
+        showApplyHttpError(m);
+      } finally {
+        hideApplyThemeProgress();
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText || "Apply This Theme";
+        }
+      }
+    });
 
     if (findForm) {
       findForm.addEventListener("submit", async (event) => {

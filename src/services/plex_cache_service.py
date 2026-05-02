@@ -64,6 +64,54 @@ class PlexCacheService:
             ).fetchall()
         return [dict(r) for r in rows], int(total)
 
+    def get_cached_shows_sorted_page(
+        self,
+        section_key: str,
+        query: str = "",
+        page: int = 1,
+        page_size: int = 50,
+        sort_by: str = "title",
+        sort_dir: str = "asc",
+    ) -> tuple[list[dict], int]:
+        """
+        Paginated shows from DB with server-side sort (no Python-side scan).
+        sort_by: title | year | folder
+        """
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 200))
+        offset = (page - 1) * page_size
+        where = "library_section_id = ? AND is_missing = 0"
+        params: list = [section_key]
+        q = (query or "").strip()
+        if q:
+            where += " AND (title LIKE ? OR folder_path LIKE ?)"
+            like = f"%{q}%"
+            params.extend([like, like])
+
+        if sort_by not in {"title", "year", "folder"}:
+            sort_by = "title"
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "asc"
+        direction = "DESC" if sort_dir == "desc" else "ASC"
+
+        if sort_by == "title":
+            order_sql = f"title COLLATE NOCASE {direction}"
+        elif sort_by == "year":
+            order_sql = f"COALESCE(year, 0) {direction}, title COLLATE NOCASE {direction}"
+        else:
+            order_sql = f"folder_path COLLATE NOCASE {direction}"
+
+        count_sql = f"SELECT COUNT(*) AS c FROM plex_shows_cache WHERE {where}"
+        page_sql = (
+            f"SELECT rating_key, title, year, folder_path, library_section_id, cached_at, last_seen_at, is_missing "
+            f"FROM plex_shows_cache WHERE {where} ORDER BY {order_sql} LIMIT ? OFFSET ?"
+        )
+
+        with get_conn(self.database_path) as conn:
+            total = conn.execute(count_sql, tuple(params)).fetchone()["c"]
+            rows = conn.execute(page_sql, tuple(params + [page_size, offset])).fetchall()
+        return [dict(r) for r in rows], int(total)
+
     @staticmethod
     def _normalize_title(value: str) -> str:
         return "".join(ch.lower() for ch in value if ch.isalnum())
