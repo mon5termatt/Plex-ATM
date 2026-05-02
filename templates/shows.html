@@ -365,5 +365,79 @@
     updateAllGrids();
     window.addEventListener("resize", updateAllGrids);
   })();
+
+  (function () {
+    const precachePosterHolders = [];
+
+    function collectShowListPosterUrls(root) {
+      const base = root && root.querySelectorAll ? root : document;
+      const out = [];
+      const seen = new Set();
+      base.querySelectorAll("img.show-poster-grid[src], img.show-poster-thumb[src]").forEach((img) => {
+        const raw = (img.getAttribute("src") || "").trim();
+        if (!raw) return;
+        let abs;
+        try {
+          abs = new URL(raw, location.href).href;
+        } catch (_) {
+          return;
+        }
+        if (seen.has(abs)) return;
+        seen.add(abs);
+        out.push(abs);
+      });
+      return out;
+    }
+
+    function precachePosterImagesInBackground(urls, options) {
+      const maxUrls = (options && options.maxUrls) || 120;
+      const maxConcurrent = (options && options.maxConcurrent) || 6;
+      const list = (urls || []).slice(0, maxUrls);
+      if (!list.length) return;
+      let idx = 0;
+      let active = 0;
+
+      function finishOne(img) {
+        const i = precachePosterHolders.indexOf(img);
+        if (i >= 0) precachePosterHolders.splice(i, 1);
+        try {
+          img.onload = img.onerror = null;
+          img.removeAttribute("src");
+        } catch (_) {}
+        active--;
+        pump();
+      }
+
+      function startOne(url) {
+        const img = new Image();
+        precachePosterHolders.push(img);
+        active++;
+        const done = () => finishOne(img);
+        img.onload = done;
+        img.onerror = done;
+        img.src = url;
+      }
+
+      function pump() {
+        while (active < maxConcurrent && idx < list.length) {
+          startOne(list[idx++]);
+        }
+      }
+      pump();
+    }
+
+    function scheduleShowListPosterPrecache() {
+      const urls = collectShowListPosterUrls(document);
+      if (!urls.length) return;
+      const run = () => precachePosterImagesInBackground(urls);
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(run, { timeout: 6000 });
+      } else {
+        setTimeout(run, 300);
+      }
+    }
+
+    scheduleShowListPosterPrecache();
+  })();
 </script>
 {% endblock %}
