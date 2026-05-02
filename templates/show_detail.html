@@ -116,7 +116,7 @@
             </div>
           </div>
           <p class="muted-text show-detail-hotkey-hint" aria-label="Keyboard shortcuts">
-            <span class="show-detail-hotkey-line"><kbd>←</kbd><kbd>→</kbd> show · <kbd>↑</kbd><kbd>↓</kbd> theme · <kbd>Space</kbd> play/pause · <kbd>Enter</kbd> apply</span>
+            <span class="show-detail-hotkey-line"><kbd>←</kbd><kbd>→</kbd> show · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> seek preview · <kbd>↑</kbd><kbd>↓</kbd> theme · <kbd>Space</kbd> play/pause · <kbd>Enter</kbd> apply</span>
             <span class="show-detail-hotkey-line show-detail-hotkey-sub">No themes yet: <kbd>Space</kbd> / <kbd>Enter</kbd> find · <kbd>↑</kbd><kbd>↓</kbd> alt titles</span>
           </p>
         </div>
@@ -577,10 +577,54 @@
       activateCandidateHotkeyNav(false);
     }
 
+    const SEEK_AUDIO_STEP_SEC = 5;
+
+    function syncAudioPlayerUiFromAudio(audio) {
+      if (!audio) return;
+      const player = audio.closest("[data-audio-player]");
+      if (!player) return;
+      const progress = player.querySelector("[data-audio-progress]");
+      const time = player.querySelector("[data-audio-time]");
+      if (!progress || !time) return;
+      if (audio.duration > 0 && isFinite(audio.duration)) {
+        const pct = (audio.currentTime / audio.duration) * 100;
+        progress.value = String(pct);
+      }
+      time.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+    }
+
+    function getAudioForHotkeySeek() {
+      const all = Array.from(document.querySelectorAll("[data-audio-element]"));
+      for (let i = 0; i < all.length; i++) {
+        const a = all[i];
+        if (!a.paused && isFinite(a.duration) && a.duration > 0) return a;
+      }
+      const items = getCandidateHotkeyNavItems();
+      if (!items.length) return null;
+      const idx = Math.min(Math.max(0, candidateHotkeyNavIndex), items.length - 1);
+      const item = items[idx];
+      if (item && item.audio && candidateHotkeySourceReady(item.audio)) {
+        const a = item.audio;
+        if (isFinite(a.duration) && a.duration > 0) return a;
+      }
+      return null;
+    }
+
     function onCandidateHotkeyNavKeydown(event) {
       if (event.defaultPrevented) return;
       const t = event.target;
       if (t && (t.closest("input, textarea, select, [contenteditable=true]") || t.closest("summary"))) return;
+
+      if (event.shiftKey && (event.code === "ArrowLeft" || event.code === "ArrowRight")) {
+        const audio = getAudioForHotkeySeek();
+        if (audio && isFinite(audio.duration) && audio.duration > 0) {
+          const delta = event.code === "ArrowLeft" ? -SEEK_AUDIO_STEP_SEC : SEEK_AUDIO_STEP_SEC;
+          audio.currentTime = Math.min(Math.max(0, audio.currentTime + delta), audio.duration);
+          syncAudioPlayerUiFromAudio(audio);
+          event.preventDefault();
+        }
+        return;
+      }
 
       if (event.code === "ArrowLeft") {
         const nav = getActiveShowNavUrls();
