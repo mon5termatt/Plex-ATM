@@ -20,23 +20,45 @@ It integrates with:
   - slug fallbacks
   - direct slug endpoint fallback
 - Uses **audio-only** candidate links (no video fallback)
-- Lets you preview candidates in-app and apply selected theme
-- Supports custom upload fallback
-- Re-encodes applied themes to **MP3 128kbps** via ffmpeg for consistent Plex theme playback
+- Lets you preview candidates in-app and **apply** a selected theme (or **upload** your own audio)
+- **Apply** and **custom upload** both run the same pipeline: re-encode to **MP3 128 kbps** with **ffmpeg**, write beside the show folder, verify on disk
+- In-browser **install progress** (stepper + status) for apply and upload when the UI uses fetch (no full-page reload for those actions)
+- After a successful apply or upload, the **Apply Candidate** sidebar refreshes so **Current Local Theme** appears with a preview player without reloading the page
 
 ## Current Workflow
 
 1. Configure Plex/Sonarr in **Settings**
 2. Rescan Plex library from **Shows**
-3. Open a show page
+3. Open a **show** detail page
 4. Adjust query or pick alternate titles if needed
-5. Find themes, preview audio, and apply
+5. **Find themes**, preview audio, and **Apply** (or use **Upload custom theme** in the top toolbar)
+6. Use **Prev show** / **Next show** (full list order) or **Next (no theme)** (shows missing a theme file, same sort/search context) as shortcuts
+
+## Show detail page
+
+- **Header**: poster, title, and folder path on the first row; **navigation and upload** on the row below.
+- **Toolbar**: Back to Shows, Prev/Next show (same order as the Shows list for your current filter/sort/search), Next (no theme), **Upload custom theme** (opens a file picker; supports common audio extensions, then the same install progress as apply).
+- **←→ target** toggle (**All** vs **No theme**): chooses which list **left/right arrow keys** use when jumping between shows. The choice is stored in `localStorage` (`plexATM_showDetailArrowNav`). **No theme** is disabled when there are no eligible neighbors.
+- **Find AnimeThemes Candidates** and **Apply Candidate** sidebar behave as before; find results replace the candidate list and can add a local-theme block when the server reports a theme on disk.
+
+## Keyboard shortcuts (show detail)
+
+| Keys | Action |
+|------|--------|
+| **←** **→** | Previous / next show (list depends on **All** vs **No theme** toggle above the hints) |
+| **Shift** + **←** **→** | Seek the theme preview ±5 seconds (playing track, else the focused candidate row) |
+| **↑** **↓** | Move focus between candidate rows (plays preview when moving) |
+| **Space** | Play / pause focused candidate preview (or submit Find when the sidebar is empty) |
+| **Enter** | Submit **Apply** for the focused candidate (or submit Find when the sidebar is empty) |
+
+When the sidebar only shows alternate titles (no candidates yet), **Space** / **Enter** can trigger **Find**, and **↑** / **↓** move among alternate title chips.
 
 ## Requirements
 
 - Python 3.11+ (3.12 recommended)
 - Plex server + token
 - Optional: Sonarr URL + API key
+- **ffmpeg** on `PATH` for theme re-encode (included in the Docker image)
 
 ## Local Setup
 
@@ -98,6 +120,7 @@ environment:
 - Includes support for slug and direct anime endpoint fallback when title filters miss
 
 Docs:
+
 - https://api-docs.animethemes.moe/content/anime/
 - https://api-docs.animethemes.moe/intro/ratelimiting/
 
@@ -112,4 +135,4 @@ Docs:
 
 ## Status
 
-This project is actively evolving. The current version focuses on practical manual workflows with strong debug visibility and safe file write checks.
+This project is actively evolving. The current version focuses on practical manual workflows with strong debug visibility, safe file write checks, and responsive show-detail UX (streaming install progress, keyboard navigation, and sidebar refresh after installs).

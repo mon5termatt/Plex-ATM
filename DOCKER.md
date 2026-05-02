@@ -28,9 +28,11 @@ docker compose up -d --build
 
 Open: `http://localhost:5000`
 
-Note: the container includes `ffmpeg` and will re-encode applied themes to MP3 128kbps.
+Note: the container includes `ffmpeg` and will re-encode applied themes and custom uploads to MP3 128kbps (same behavior as a local Python install).
 
 `/app/data` stores app settings + SQLite DB and now persists in the named Docker volume `plex_atm_data`.
+
+Show-detail behavior (toolbar, keyboard shortcuts, install progress UI) is described in the root **`README.md`**.
 
 ## 4) Set Plex/Sonarr paths to container-visible paths
 
