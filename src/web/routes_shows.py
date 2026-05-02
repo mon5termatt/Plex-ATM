@@ -43,6 +43,9 @@ _bulk_scan_state: dict = {
     "finished_at": "",
     "message": "",
 }
+# In-process Plex + Sonarr snapshot per show (short TTL) to avoid duplicate upstream calls on refresh.
+_show_detail_live_cache: dict[str, tuple[float, object, object]] = {}
+_SHOW_DETAIL_LIVE_TTL_SEC = 180.0
 
 
 def _bulk_state_snapshot() -> dict:
@@ -239,6 +242,135 @@ def _normalized_list_state(raw: dict) -> dict:
     if state["view"] not in {"table", "grid"}:
         state["view"] = "table"
     return state
+
+
+def _rating_keys_missing_theme_ordered(
+    svc: dict,
+    library_key: str,
+    query: str,
+    sort_by: str,
+    sort_dir: str,
+) -> list[str]:
+    """Rating keys for shows with no theme file on disk, ordered like the Shows list (theme_filter=none)."""
+    trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
+    shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
+    enriched: list[dict] = []
+    for row in shows:
+        show = dict(row)
+        show["folder_path"] = _resolve_existing_show_folder_path(
+            svc, show["folder_path"], trusted_roots=trusted_roots
+        )
+        if _find_theme_file_in_show_folder(show["folder_path"]):
+            continue
+        enriched.append(show)
+    reverse = sort_dir == "desc"
+    if sort_by == "title":
+        enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+    elif sort_by == "year":
+        enriched.sort(key=lambda s: (s.get("year") or 0, (s.get("title") or "").casefold()), reverse=reverse)
+    elif sort_by == "folder":
+        enriched.sort(key=lambda s: (s.get("folder_path") or "").casefold(), reverse=reverse)
+    elif sort_by == "has_theme":
+        enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+    else:
+        enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+    return [str(s["rating_key"]) for s in enriched]
+
+
+def _next_rating_key_missing_theme(ordered_keys: list[str], current_rating_key: str):
+    if not ordered_keys:
+        return None
+    cur = str(current_rating_key)
+    try:
+        i = ordered_keys.index(cur)
+    except ValueError:
+        return ordered_keys[0]
+    if len(ordered_keys) == 1:
+        return None
+    return ordered_keys[(i + 1) % len(ordered_keys)]
+
+
+def _prev_rating_key_missing_theme(ordered_keys: list[str], current_rating_key: str):
+    if not ordered_keys:
+        return None
+    cur = str(current_rating_key)
+    try:
+        i = ordered_keys.index(cur)
+    except ValueError:
+        return ordered_keys[-1]
+    if len(ordered_keys) == 1:
+        return None
+    return ordered_keys[(i - 1) % len(ordered_keys)]
+
+
+def _rating_keys_shows_list_ordered(
+    svc: dict,
+    library_key: str,
+    query: str,
+    sort_by: str,
+    sort_dir: str,
+    theme_filter: str,
+) -> list[str]:
+    """Full show list order matching the Shows page (filter + sort + search), for prev/next navigation."""
+    if not library_key:
+        return []
+    trusted_roots = _runtime_trusted_paths(svc, include_sonarr=False)
+    use_db_sort = theme_filter == "all" and sort_by in {"title", "year", "folder"}
+    if use_db_sort:
+        rows = svc["cache"].get_cached_shows_sorted_all(
+            library_key, query=query, sort_by=sort_by, sort_dir=sort_dir
+        )
+        enriched: list[dict] = []
+        for row in rows:
+            show = dict(row)
+            show["folder_path"] = _resolve_existing_show_folder_path(
+                svc, show["folder_path"], trusted_roots=trusted_roots
+            )
+            show["has_current_theme"] = bool(_find_theme_file_in_show_folder(show["folder_path"]))
+            enriched.append(show)
+    else:
+        shows = svc["cache"].get_cached_shows_filtered(library_key, query=query)
+        enriched = []
+        for row in shows:
+            show = dict(row)
+            show["folder_path"] = _resolve_existing_show_folder_path(
+                svc, show["folder_path"], trusted_roots=trusted_roots
+            )
+            show["has_current_theme"] = bool(_find_theme_file_in_show_folder(show["folder_path"]))
+            if theme_filter == "has" and not show["has_current_theme"]:
+                continue
+            if theme_filter == "none" and show["has_current_theme"]:
+                continue
+            enriched.append(show)
+        reverse = sort_dir == "desc"
+        if sort_by == "title":
+            enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+        elif sort_by == "year":
+            enriched.sort(key=lambda s: (s.get("year") or 0, (s.get("title") or "").casefold()), reverse=reverse)
+        elif sort_by == "folder":
+            enriched.sort(key=lambda s: (s.get("folder_path") or "").casefold(), reverse=reverse)
+        elif sort_by == "has_theme":
+            enriched.sort(
+                key=lambda s: (1 if s.get("has_current_theme") else 0, (s.get("title") or "").casefold()),
+                reverse=reverse,
+            )
+        else:
+            enriched.sort(key=lambda s: (s.get("title") or "").casefold(), reverse=reverse)
+    return [str(s["rating_key"]) for s in enriched]
+
+
+def _neighbor_rating_keys_linear(ordered_keys: list[str], current_rating_key: str):
+    """Previous and next rating_key in order; no wrap. Missing current returns (None, None)."""
+    if not ordered_keys:
+        return (None, None)
+    cur = str(current_rating_key)
+    try:
+        i = ordered_keys.index(cur)
+    except ValueError:
+        return (None, None)
+    prev_k = ordered_keys[i - 1] if i > 0 else None
+    next_k = ordered_keys[i + 1] if i + 1 < len(ordered_keys) else None
+    return (prev_k, next_k)
 
 
 def _query_from_animethemes_url(raw_url: str) -> str:
@@ -789,42 +921,49 @@ def show_detail(rating_key: str):
     show_data["poster_url"] = _build_plex_poster_url(svc, show_data["rating_key"])
 
     live_plex = None
-    plex_url = svc["settings"].get("plex_url", "")
-    plex_token = svc["settings"].get("plex_token", "")
-    if plex_url and plex_token:
-        try:
-            live_plex = PlexClient(plex_url, plex_token).get_show_metadata_raw(rating_key)
-        except Exception as exc:
-            live_plex = {"error": str(exc)}
-
     live_sonarr = None
-    sonarr_url = svc["settings"].get("sonarr_url", "")
-    sonarr_api_key = svc["settings"].get("sonarr_api_key", "")
-    if sonarr_url and sonarr_api_key:
-        try:
-            tvdb_id = None
-            tmdb_id = None
-            if live_plex and isinstance(live_plex, dict):
-                metadata = live_plex.get("MediaContainer", {}).get("Metadata", [])
-                if metadata:
-                    guid_items = metadata[0].get("Guid", [])
-                    for item in guid_items:
-                        guid_value = str(item.get("id", ""))
-                        if guid_value.startswith("tvdb://"):
-                            raw = guid_value.split("tvdb://", 1)[1]
-                            if raw.isdigit():
-                                tvdb_id = int(raw)
-                        if guid_value.startswith("tmdb://"):
-                            raw = guid_value.split("tmdb://", 1)[1]
-                            if raw.isdigit():
-                                tmdb_id = int(raw)
-            live_sonarr = SonarrClient(sonarr_url, sonarr_api_key).find_series_for_show(
-                show_data["title"],
-                tvdb_id=tvdb_id,
-                tmdb_id=tmdb_id,
-            )
-        except Exception as exc:
-            live_sonarr = {"error": str(exc)}
+    now_mono = time.monotonic()
+    cached_live = _show_detail_live_cache.get(rating_key)
+    if cached_live and (now_mono - cached_live[0]) < _SHOW_DETAIL_LIVE_TTL_SEC:
+        live_plex, live_sonarr = cached_live[1], cached_live[2]
+    else:
+        plex_url = svc["settings"].get("plex_url", "")
+        plex_token = svc["settings"].get("plex_token", "")
+        if plex_url and plex_token:
+            try:
+                live_plex = PlexClient(plex_url, plex_token).get_show_metadata_raw(rating_key)
+            except Exception as exc:
+                live_plex = {"error": str(exc)}
+
+        sonarr_url = svc["settings"].get("sonarr_url", "")
+        sonarr_api_key = svc["settings"].get("sonarr_api_key", "")
+        if sonarr_url and sonarr_api_key:
+            try:
+                tvdb_id = None
+                tmdb_id = None
+                if live_plex and isinstance(live_plex, dict):
+                    metadata = live_plex.get("MediaContainer", {}).get("Metadata", [])
+                    if metadata:
+                        guid_items = metadata[0].get("Guid", [])
+                        for item in guid_items:
+                            guid_value = str(item.get("id", ""))
+                            if guid_value.startswith("tvdb://"):
+                                raw = guid_value.split("tvdb://", 1)[1]
+                                if raw.isdigit():
+                                    tvdb_id = int(raw)
+                            if guid_value.startswith("tmdb://"):
+                                raw = guid_value.split("tmdb://", 1)[1]
+                                if raw.isdigit():
+                                    tmdb_id = int(raw)
+                live_sonarr = SonarrClient(sonarr_url, sonarr_api_key).find_series_for_show(
+                    show_data["title"],
+                    tvdb_id=tvdb_id,
+                    tmdb_id=tmdb_id,
+                )
+            except Exception as exc:
+                live_sonarr = {"error": str(exc)}
+
+        _show_detail_live_cache[rating_key] = (now_mono, live_plex, live_sonarr)
 
     search_overrides = svc["settings"].get("show_search_overrides", {})
     animethemes_url_overrides = svc["settings"].get("show_animethemes_url_overrides", {}) or {}
@@ -846,6 +985,39 @@ def show_detail(rating_key: str):
     local_theme_path = _find_theme_file_in_show_folder(show_data["folder_path"])
     local_theme_available = bool(local_theme_path)
     back_to_list_params = _normalized_list_state(request.args)
+    next_no_theme_show_url = None
+    prev_no_theme_show_url = None
+    prev_show_url = None
+    next_show_url = None
+    library_key_nav = str(svc["settings"].get("library_key", "") or "").strip()
+    if library_key_nav:
+        ordered_no_theme = _rating_keys_missing_theme_ordered(
+            svc,
+            library_key_nav,
+            back_to_list_params["q"],
+            back_to_list_params["sort_by"],
+            back_to_list_params["sort_dir"],
+        )
+        prv_nt = _prev_rating_key_missing_theme(ordered_no_theme, rating_key)
+        if prv_nt and prv_nt != str(rating_key):
+            prev_no_theme_show_url = url_for("shows.show_detail", rating_key=prv_nt, **back_to_list_params)
+        nxt = _next_rating_key_missing_theme(ordered_no_theme, rating_key)
+        if nxt and nxt != str(rating_key):
+            next_no_theme_show_url = url_for("shows.show_detail", rating_key=nxt, **back_to_list_params)
+
+        ordered_shows = _rating_keys_shows_list_ordered(
+            svc,
+            library_key_nav,
+            back_to_list_params["q"],
+            back_to_list_params["sort_by"],
+            back_to_list_params["sort_dir"],
+            back_to_list_params["theme_filter"],
+        )
+        prev_key, next_key = _neighbor_rating_keys_linear(ordered_shows, rating_key)
+        if prev_key:
+            prev_show_url = url_for("shows.show_detail", rating_key=prev_key, **back_to_list_params)
+        if next_key:
+            next_show_url = url_for("shows.show_detail", rating_key=next_key, **back_to_list_params)
     return render_template(
         "show_detail.html",
         show=show_data,
@@ -860,6 +1032,10 @@ def show_detail(rating_key: str):
         initial_animethemes_url_override=initial_animethemes_url_override,
         back_to_list_params=back_to_list_params,
         back_to_list_url=url_for("shows.list_shows", **back_to_list_params),
+        next_no_theme_show_url=next_no_theme_show_url,
+        prev_no_theme_show_url=prev_no_theme_show_url,
+        prev_show_url=prev_show_url,
+        next_show_url=next_show_url,
         animethemes_base_url=current_app.config["ANIMETHEMES_BASE_URL"].rstrip("/"),
         debug_logs=debug_logs,
     )
@@ -1179,13 +1355,20 @@ def apply_candidate(rating_key: str):
 
 @shows_bp.route("/shows/<rating_key>/upload", methods=["POST"])
 def upload_theme(rating_key: str):
+    is_fetch = request.headers.get("X-Requested-With") == "fetch"
     svc = _services()
     file = request.files.get("theme_file")
     if not file or not file.filename:
-        flash("Choose an audio file first.", "error")
+        msg = "Choose an audio file first."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 400
+        flash(msg, "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
     if not file.filename.lower().endswith((".mp3", ".m4a", ".flac", ".ogg")):
-        flash("Only audio file uploads are supported.", "error")
+        msg = "Only audio file uploads are supported."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 400
+        flash(msg, "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 
     with get_conn(current_app.config["DATABASE_PATH"]) as conn:
@@ -1194,6 +1377,8 @@ def upload_theme(rating_key: str):
             (rating_key,),
         ).fetchone()
         if not show:
+            if is_fetch:
+                return jsonify({"ok": False, "message": "Show not found."}), 404
             flash("Show not found.", "error")
             return redirect(url_for("shows.list_shows"))
 
@@ -1201,10 +1386,68 @@ def upload_theme(rating_key: str):
     show_folder = _resolve_existing_show_folder_path(svc, show["folder_path"])
     target_folder = _resolve_write_folder(svc, show_folder)
     if not _is_within_trusted_paths(target_folder, trusted_paths):
-        flash("Target folder is outside trusted Plex library paths.", "error")
+        msg = "Target folder is outside trusted Plex library paths."
+        if is_fetch:
+            return jsonify({"ok": False, "message": msg}), 403
+        flash(msg, "error")
         return redirect(url_for("shows.show_detail", rating_key=rating_key, **_normalized_list_state(request.form)))
 
-    ok, message = svc["apply"].install_from_upload(show["rating_key"], target_folder, file.read())
+    uploaded_name = (file.filename or "").strip() or "theme"
+    file_bytes = file.read()
+
+    if is_fetch:
+
+        def ndjson_stream():
+            for ev in svc["apply"].install_from_upload_with_progress(show["rating_key"], target_folder, file_bytes):
+                if ev.get("type") == "progress":
+                    row = {
+                        "type": "progress",
+                        "message": ev.get("message", ""),
+                    }
+                    if "completed_steps" in ev:
+                        row["completed_steps"] = ev.get("completed_steps")
+                    if "total_steps" in ev:
+                        row["total_steps"] = ev.get("total_steps")
+                    if ev.get("stage"):
+                        row["stage"] = ev.get("stage")
+                    yield json.dumps(row) + "\n"
+                elif ev.get("type") == "done":
+                    ok_ev = bool(ev.get("ok"))
+                    raw_msg = str(ev.get("message", "") or "")
+                    if ok_ev:
+                        with get_conn(current_app.config["DATABASE_PATH"]) as conn:
+                            conn.execute(
+                                "INSERT INTO theme_candidates(show_rating_key, source, label, audio_url, meta_json, cached_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                (
+                                    rating_key,
+                                    "custom_upload",
+                                    f"Uploaded: {uploaded_name}",
+                                    "",
+                                    json.dumps({"filename": uploaded_name}),
+                                    datetime.now(timezone.utc).isoformat(),
+                                ),
+                            )
+                            conn.commit()
+                    payload = {
+                        "type": "done",
+                        "ok": ok_ev,
+                        "message": (f"Upload applied: {raw_msg}" if ok_ev else f"Upload failed: {raw_msg}"),
+                    }
+                    if ok_ev:
+                        payload["local_theme_url"] = url_for("shows.play_current_theme", rating_key=rating_key)
+                    else:
+                        payload["error_detail"] = raw_msg
+                        if isinstance(ev.get("failed_step"), int):
+                            payload["failed_step"] = ev["failed_step"]
+                    yield json.dumps(payload) + "\n"
+
+        return Response(
+            stream_with_context(ndjson_stream()),
+            mimetype="application/x-ndjson",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    ok, message = svc["apply"].install_from_upload(show["rating_key"], target_folder, file_bytes)
     if ok:
         with get_conn(current_app.config["DATABASE_PATH"]) as conn:
             conn.execute(
@@ -1212,9 +1455,9 @@ def upload_theme(rating_key: str):
                 (
                     rating_key,
                     "custom_upload",
-                    f"Uploaded: {file.filename}",
+                    f"Uploaded: {uploaded_name}",
                     "",
-                    json.dumps({"filename": file.filename}),
+                    json.dumps({"filename": uploaded_name}),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )

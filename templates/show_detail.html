@@ -18,7 +18,7 @@
             >
               <div class="apply-theme-step-node is-pending" data-step="0">
                 <span class="apply-theme-step-circle" aria-hidden="true"></span>
-                <span class="apply-theme-step-label">Download</span>
+                <span class="apply-theme-step-label">Load</span>
               </div>
               <div class="apply-theme-step-rail is-pending" data-rail="0" aria-hidden="true">
                 <span class="apply-theme-step-rail-line"></span>
@@ -54,16 +54,74 @@
     </div>
   </div>
   <section class="shows-main">
-    <section class="row">
+    <section class="show-detail-top-row">
       <div class="show-header">
         {% if show.poster_url %}
           <img src="{{ show.poster_url }}" alt="{{ show.title }} poster" class="show-poster-large" loading="lazy">
         {% endif %}
-        <h2>{{ show.title }}</h2>
+        <div class="show-header-text">
+          <h2>{{ show.title }}</h2>
+          <p class="show-header-folder"><span class="show-header-folder-label">Folder</span> {{ show.folder_path }}</p>
+        </div>
       </div>
-      <a class="action-link-btn secondary-btn-link" href="{{ back_to_list_url }}">Back to Shows</a>
+      <div class="show-detail-toolbar-wrap">
+        <div class="show-detail-toolbar">
+          <a class="action-link-btn secondary-btn-link" href="{{ back_to_list_url }}">Back to Shows</a>
+          {% if prev_show_url %}
+          <a class="action-link-btn secondary-btn-link" href="{{ prev_show_url }}" title="Previous show (same list order as Shows)">Prev show</a>
+          {% endif %}
+          {% if next_show_url %}
+          <a class="action-link-btn secondary-btn-link" href="{{ next_show_url }}" title="Next show (same list order as Shows)">Next show</a>
+          {% endif %}
+          {% if next_no_theme_show_url %}
+          <a class="action-link-btn secondary-btn-link" href="{{ next_no_theme_show_url }}" title="Next show with no theme file (no-theme queue, same sort and search)">Next (no theme)</a>
+          {% endif %}
+          <form
+            id="upload-theme-form"
+            class="show-detail-toolbar-upload-form"
+            method="post"
+            action="{{ url_for('shows.upload_theme', rating_key=show.rating_key) }}"
+            enctype="multipart/form-data"
+          >
+            <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
+            <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
+            <input type="hidden" name="sort_by" value="{{ back_to_list_params.sort_by }}">
+            <input type="hidden" name="sort_dir" value="{{ back_to_list_params.sort_dir }}">
+            <input type="hidden" name="page" value="{{ back_to_list_params.page }}">
+            <input type="hidden" name="page_size" value="{{ back_to_list_params.page_size }}">
+            <input type="hidden" name="view" value="{{ back_to_list_params.view }}">
+            <input
+              type="file"
+              id="upload-theme-file-input"
+              name="theme_file"
+              accept=".mp3,.m4a,.flac,.ogg"
+              class="upload-theme-file-input"
+              tabindex="-1"
+              aria-label="Theme audio file"
+            >
+            <button type="button" id="upload-theme-pick-btn" class="action-link-btn secondary-btn-link upload-theme-pick-btn">Upload custom theme…</button>
+          </form>
+        </div>
+        <div class="show-detail-hotkey-bar">
+          <div
+            class="show-detail-arrow-mode"
+            id="show-detail-arrow-mode"
+            role="group"
+            aria-label="Arrow keys: which show list to navigate"
+          >
+            <span class="show-detail-arrow-mode-caption" title="Left/right arrow keys jump between shows">←→</span>
+            <div class="show-detail-arrow-mode-switch" id="show-detail-arrow-mode-switch">
+              <button type="button" class="show-detail-arrow-mode-btn" data-arrow-nav-mode="all" aria-pressed="true">All</button>
+              <button type="button" class="show-detail-arrow-mode-btn" data-arrow-nav-mode="noTheme" aria-pressed="false">No theme</button>
+            </div>
+          </div>
+          <p class="muted-text show-detail-hotkey-hint" aria-label="Keyboard shortcuts">
+            <span class="show-detail-hotkey-line"><kbd>←</kbd><kbd>→</kbd> show · <kbd>↑</kbd><kbd>↓</kbd> theme · <kbd>Space</kbd> play/pause · <kbd>Enter</kbd> apply</span>
+            <span class="show-detail-hotkey-line show-detail-hotkey-sub">No themes yet: <kbd>Space</kbd> / <kbd>Enter</kbd> find · <kbd>↑</kbd><kbd>↓</kbd> alt titles</span>
+          </p>
+        </div>
+      </div>
     </section>
-    <p class="card"><strong>Folder:</strong> {{ show.folder_path }}</p>
 
     <section class="card">
       <h3>Find AnimeThemes Candidates</h3>
@@ -118,21 +176,6 @@
         <span class="loading-spinner" aria-hidden="true"></span>
         <span>Please wait, fetching themes<span class="loading-dots"></span></span>
       </div>
-    </section>
-
-    <section class="card">
-      <h3>Upload Custom Theme</h3>
-      <form method="post" action="{{ url_for('shows.upload_theme', rating_key=show.rating_key) }}" enctype="multipart/form-data">
-        <input type="hidden" name="q" value="{{ back_to_list_params.q }}">
-        <input type="hidden" name="theme_filter" value="{{ back_to_list_params.theme_filter }}">
-        <input type="hidden" name="sort_by" value="{{ back_to_list_params.sort_by }}">
-        <input type="hidden" name="sort_dir" value="{{ back_to_list_params.sort_dir }}">
-        <input type="hidden" name="page" value="{{ back_to_list_params.page }}">
-        <input type="hidden" name="page_size" value="{{ back_to_list_params.page_size }}">
-        <input type="hidden" name="view" value="{{ back_to_list_params.view }}">
-        <input type="file" name="theme_file" accept=".mp3,.m4a,.flac,.ogg">
-        <button type="submit">Upload and Apply</button>
-      </form>
     </section>
   </section>
 
@@ -194,16 +237,17 @@
           </form>
         </article>
         {% endfor %}
-      </div>
       {% else %}
-        <p id="apply-empty-state">No candidates saved yet and no local theme found.</p>
+        <p id="apply-empty-state" class="muted-text">No candidates saved yet and no local theme found.</p>
       {% endif %}
+      </div>
     </section>
   </aside>
 </div>
 
 <script id="animethemes-debug-json" type="application/json">{{ api_debug.get("animethemes_lookup", {}) | tojson | safe }}</script>
 <script id="back-to-list-state-json" type="application/json">{{ back_to_list_params | tojson | safe }}</script>
+<script id="show-detail-nav-urls-json" type="application/json">{{ {"all": {"prev": prev_show_url or "", "next": next_show_url or ""}, "noTheme": {"prev": prev_no_theme_show_url or "", "next": next_no_theme_show_url or ""}} | tojson | safe }}</script>
 <script>
   (function () {
     const input = document.getElementById("search-query-input");
@@ -217,7 +261,6 @@
     const manualSearchWrap = document.getElementById("animethemes-manual-search");
     const manualSearchLink = document.getElementById("animethemes-manual-search-link");
     const candidatesContainer = document.getElementById("apply-candidates-container");
-    const emptyState = document.getElementById("apply-empty-state");
     const applyAction = "{{ url_for('shows.apply_candidate', rating_key=show.rating_key) }}";
     let listState = {};
     const listStateNode = document.getElementById("back-to-list-state-json");
@@ -227,6 +270,72 @@
       } catch (err) {
         console.error("[Plex ATM] Failed to parse back-to-list state JSON.", err);
       }
+    }
+    const ARROW_NAV_MODE_KEY = "plexATM_showDetailArrowNav";
+    let showNavByMode = {
+      all: { prev: "", next: "" },
+      noTheme: { prev: "", next: "" },
+    };
+    const showNavUrlsNode = document.getElementById("show-detail-nav-urls-json");
+    if (showNavUrlsNode && showNavUrlsNode.textContent) {
+      try {
+        const raw = JSON.parse(showNavUrlsNode.textContent);
+        if (raw && raw.all && raw.noTheme) {
+          showNavByMode = {
+            all: { prev: String(raw.all.prev || ""), next: String(raw.all.next || "") },
+            noTheme: { prev: String(raw.noTheme.prev || ""), next: String(raw.noTheme.next || "") },
+          };
+        } else if (raw && ("prev" in raw || "next" in raw)) {
+          showNavByMode.all = { prev: String(raw.prev || ""), next: String(raw.next || "") };
+        }
+      } catch (_) {}
+    }
+    const noThemeNavAvailable = Boolean(showNavByMode.noTheme.prev || showNavByMode.noTheme.next);
+    let arrowNavMode = "all";
+    try {
+      const stored = localStorage.getItem(ARROW_NAV_MODE_KEY);
+      if (stored === "noTheme") {
+        if (noThemeNavAvailable) arrowNavMode = "noTheme";
+        else localStorage.removeItem(ARROW_NAV_MODE_KEY);
+      }
+    } catch (_) {}
+    function getActiveShowNavUrls() {
+      if (arrowNavMode === "noTheme" && noThemeNavAvailable) return showNavByMode.noTheme;
+      return showNavByMode.all;
+    }
+    const arrowModeSwitch = document.getElementById("show-detail-arrow-mode-switch");
+    const arrowModeBtns = arrowModeSwitch ? arrowModeSwitch.querySelectorAll("[data-arrow-nav-mode]") : [];
+    function syncArrowNavModeUi() {
+      arrowModeBtns.forEach((btn) => {
+        const m = btn.getAttribute("data-arrow-nav-mode");
+        const on = m === arrowNavMode;
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        if (m === "noTheme") {
+          btn.disabled = !noThemeNavAvailable;
+          btn.title = noThemeNavAvailable
+            ? "Left/right arrows jump between shows missing a theme file (same order as no-theme list)"
+            : "No shows without a theme in this list, or library not configured";
+        } else {
+          btn.disabled = false;
+          btn.title = "Left/right arrows use the full Shows list order (respects filter & sort)";
+        }
+      });
+    }
+    if (arrowModeBtns.length) {
+      arrowModeBtns.forEach((btn) => {
+        btn.addEventListener("click", function () {
+          const m = btn.getAttribute("data-arrow-nav-mode");
+          if (m !== "all" && m !== "noTheme") return;
+          if (m === "noTheme" && !noThemeNavAvailable) return;
+          arrowNavMode = m;
+          try {
+            localStorage.setItem(ARROW_NAV_MODE_KEY, arrowNavMode);
+          } catch (_) {}
+          syncArrowNavModeUi();
+        });
+      });
+      syncArrowNavModeUi();
     }
     const localThemeInitially = findForm ? findForm.dataset.localThemeInitial === "1" : false;
     const localThemeUrl = findForm ? (findForm.dataset.localThemeUrl || "") : "";
@@ -317,152 +426,6 @@
       });
     }
 
-    const precacheAudioHolders = [];
-
-    function collectCandidateThemeAudioUrls(root) {
-      const base = root && root.querySelectorAll ? root : document;
-      const out = [];
-      const seen = new Set();
-      base.querySelectorAll(".candidate-audio source[src]").forEach((s) => {
-        const raw = (s.getAttribute("src") || "").trim();
-        if (!raw) return;
-        let abs;
-        try {
-          abs = new URL(raw, location.href).href;
-        } catch (_) {
-          return;
-        }
-        if (seen.has(abs)) return;
-        seen.add(abs);
-        out.push(abs);
-      });
-      return out;
-    }
-
-    function precacheThemeAudioInBackground(urls, options) {
-      const maxUrls = (options && options.maxUrls) || 24;
-      const maxConcurrent = (options && options.maxConcurrent) || 2;
-      const list = (urls || []).slice(0, maxUrls);
-      if (!list.length) return;
-      let idx = 0;
-      let active = 0;
-
-      function finishOne(a) {
-        const i = precacheAudioHolders.indexOf(a);
-        if (i >= 0) precacheAudioHolders.splice(i, 1);
-        try {
-          a.removeAttribute("src");
-          a.load();
-        } catch (_) {}
-        active--;
-        pump();
-      }
-
-      function startOne(url) {
-        const a = new Audio();
-        precacheAudioHolders.push(a);
-        active++;
-        const done = () => finishOne(a);
-        a.addEventListener("canplaythrough", done, { once: true });
-        a.addEventListener("error", done, { once: true });
-        a.preload = "auto";
-        a.src = url;
-        try {
-          a.load();
-        } catch (_) {
-          done();
-        }
-      }
-
-      function pump() {
-        while (active < maxConcurrent && idx < list.length) {
-          startOne(list[idx++]);
-        }
-      }
-      pump();
-    }
-
-    function scheduleCandidateThemePrecache(root) {
-      const urls = collectCandidateThemeAudioUrls(root);
-      if (!urls.length) return;
-      const run = () => precacheThemeAudioInBackground(urls);
-      if (typeof requestIdleCallback === "function") {
-        requestIdleCallback(run, { timeout: 5000 });
-      } else {
-        setTimeout(run, 300);
-      }
-    }
-
-    const precachePosterHolders = [];
-
-    function collectPosterImageUrlsFromDom(root) {
-      const base = root && root.querySelectorAll ? root : document;
-      const out = [];
-      const seen = new Set();
-      base.querySelectorAll("img.show-poster-large[src]").forEach((img) => {
-        const raw = (img.getAttribute("src") || "").trim();
-        if (!raw) return;
-        let abs;
-        try {
-          abs = new URL(raw, location.href).href;
-        } catch (_) {
-          return;
-        }
-        if (seen.has(abs)) return;
-        seen.add(abs);
-        out.push(abs);
-      });
-      return out;
-    }
-
-    function precachePosterImagesInBackground(urls, options) {
-      const maxUrls = (options && options.maxUrls) || 4;
-      const maxConcurrent = (options && options.maxConcurrent) || 2;
-      const list = (urls || []).slice(0, maxUrls);
-      if (!list.length) return;
-      let idx = 0;
-      let active = 0;
-
-      function finishOne(img) {
-        const i = precachePosterHolders.indexOf(img);
-        if (i >= 0) precachePosterHolders.splice(i, 1);
-        try {
-          img.onload = img.onerror = null;
-          img.removeAttribute("src");
-        } catch (_) {}
-        active--;
-        pump();
-      }
-
-      function startOne(url) {
-        const img = new Image();
-        precachePosterHolders.push(img);
-        active++;
-        const done = () => finishOne(img);
-        img.onload = done;
-        img.onerror = done;
-        img.src = url;
-      }
-
-      function pump() {
-        while (active < maxConcurrent && idx < list.length) {
-          startOne(list[idx++]);
-        }
-      }
-      pump();
-    }
-
-    function schedulePosterPrecache(root) {
-      const urls = collectPosterImageUrlsFromDom(root);
-      if (!urls.length) return;
-      const run = () => precachePosterImagesInBackground(urls);
-      if (typeof requestIdleCallback === "function") {
-        requestIdleCallback(run, { timeout: 5000 });
-      } else {
-        setTimeout(run, 300);
-      }
-    }
-
     function initAudioPlayers(scope) {
       const players = (scope || document).querySelectorAll("[data-audio-player]");
       players.forEach((player) => {
@@ -514,6 +477,208 @@
       });
       });
     }
+
+    let candidateHotkeyNavIndex = 0;
+    let altTitleHotkeyIndex = -1;
+
+    function getAltTitleButtons() {
+      return Array.from(document.querySelectorAll(".alt-title-btn"));
+    }
+
+    function clearAltTitleHotkeyFocus() {
+      document.querySelectorAll(".alt-title-btn-hotkey-focus").forEach((el) => {
+        el.classList.remove("alt-title-btn-hotkey-focus");
+      });
+    }
+
+    function applyAltTitleHotkeySelection(index) {
+      const btns = getAltTitleButtons();
+      if (!btns.length) return;
+      const idx = ((index % btns.length) + btns.length) % btns.length;
+      altTitleHotkeyIndex = idx;
+      clearAltTitleHotkeyFocus();
+      const b = btns[idx];
+      b.classList.add("alt-title-btn-hotkey-focus");
+      const q = b.getAttribute("data-alt-query");
+      if (q && input) input.value = q;
+      try {
+        b.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch (_) {}
+    }
+
+    function candidateHotkeySourceReady(audio) {
+      if (!audio) return false;
+      const srcEl = audio.querySelector("source");
+      const raw = srcEl ? (srcEl.getAttribute("src") || "").trim() : "";
+      return Boolean(raw);
+    }
+
+    function getCandidateHotkeyNavItems() {
+      const container = document.getElementById("apply-candidates-container");
+      if (!container) return [];
+      const out = [];
+      container.querySelectorAll(":scope > .candidate-item").forEach((article) => {
+        const audio = article.querySelector("[data-audio-element]");
+        const form = article.querySelector("form.apply-candidate-form");
+        if (!form && !candidateHotkeySourceReady(audio)) return;
+        out.push({ article, audio: candidateHotkeySourceReady(audio) ? audio : null, form });
+      });
+      return out;
+    }
+
+    function clearCandidateHotkeyFocusClass() {
+      document.querySelectorAll(".candidate-item-hotkey-focus").forEach((el) => {
+        el.classList.remove("candidate-item-hotkey-focus");
+      });
+    }
+
+    function activateCandidateHotkeyNav(playAudio) {
+      const items = getCandidateHotkeyNavItems();
+      clearCandidateHotkeyFocusClass();
+      if (!items.length) {
+        candidateHotkeyNavIndex = 0;
+        return;
+      }
+      if (candidateHotkeyNavIndex >= items.length) candidateHotkeyNavIndex = 0;
+      if (candidateHotkeyNavIndex < 0) candidateHotkeyNavIndex = items.length - 1;
+      const item = items[candidateHotkeyNavIndex];
+      item.article.classList.add("candidate-item-hotkey-focus");
+      try {
+        item.article.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch (_) {}
+      if (!playAudio) return;
+      items.forEach(({ audio }) => {
+        if (!audio) return;
+        const player = audio.closest("[data-audio-player]");
+        const playBtn = player ? player.querySelector("[data-audio-play]") : null;
+        audio.pause();
+        if (playBtn) playBtn.textContent = "Play";
+      });
+      if (item.audio) {
+        stopOtherPlayers(item.audio);
+        try {
+          item.audio.currentTime = 0;
+        } catch (_) {}
+        item.audio.play().catch(() => {});
+      }
+    }
+
+    function moveCandidateHotkeyNav(delta) {
+      const items = getCandidateHotkeyNavItems();
+      if (!items.length) return;
+      candidateHotkeyNavIndex = (candidateHotkeyNavIndex + delta + items.length) % items.length;
+      activateCandidateHotkeyNav(true);
+    }
+
+    function refreshCandidateHotkeyNav() {
+      altTitleHotkeyIndex = -1;
+      clearAltTitleHotkeyFocus();
+      candidateHotkeyNavIndex = 0;
+      activateCandidateHotkeyNav(false);
+    }
+
+    function onCandidateHotkeyNavKeydown(event) {
+      if (event.defaultPrevented) return;
+      const t = event.target;
+      if (t && (t.closest("input, textarea, select, [contenteditable=true]") || t.closest("summary"))) return;
+
+      if (event.code === "ArrowLeft") {
+        const nav = getActiveShowNavUrls();
+        if (nav.prev) {
+          event.preventDefault();
+          window.location.href = nav.prev;
+        }
+        return;
+      }
+      if (event.code === "ArrowRight") {
+        const nav = getActiveShowNavUrls();
+        if (nav.next) {
+          event.preventDefault();
+          window.location.href = nav.next;
+        }
+        return;
+      }
+
+      const items = getCandidateHotkeyNavItems();
+      const applySidebarEmpty =
+        candidatesContainer && candidatesContainer.querySelector("#apply-empty-state");
+
+      if (applySidebarEmpty && findForm) {
+        if (event.code === "Space" || (event.code === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey)) {
+          if (!t.closest("button, a[href], [role=button]")) {
+            event.preventDefault();
+            findForm.requestSubmit();
+          }
+          return;
+        }
+        if (event.code === "ArrowUp" || event.code === "MediaTrackPrevious") {
+          const btns = getAltTitleButtons();
+          if (btns.length) {
+            altTitleHotkeyIndex =
+              altTitleHotkeyIndex < 0 ? btns.length - 1 : (altTitleHotkeyIndex - 1 + btns.length) % btns.length;
+            applyAltTitleHotkeySelection(altTitleHotkeyIndex);
+            event.preventDefault();
+          }
+          return;
+        }
+        if (event.code === "ArrowDown" || event.code === "MediaTrackNext") {
+          const btns = getAltTitleButtons();
+          if (btns.length) {
+            altTitleHotkeyIndex = altTitleHotkeyIndex < 0 ? 0 : (altTitleHotkeyIndex + 1) % btns.length;
+            applyAltTitleHotkeySelection(altTitleHotkeyIndex);
+            event.preventDefault();
+          }
+          return;
+        }
+      }
+
+      if (event.code === "Space") {
+        let handled = false;
+        if (items.length) {
+          const item = items[Math.min(candidateHotkeyNavIndex, items.length - 1)];
+          if (item && item.audio) {
+            const player = item.audio.closest("[data-audio-player]");
+            const playBtn = player ? player.querySelector("[data-audio-play]") : null;
+            if (item.audio.paused) {
+              stopOtherPlayers(item.audio);
+              item.audio.play().catch(() => {});
+            } else {
+              item.audio.pause();
+              if (playBtn) playBtn.textContent = "Play";
+            }
+            handled = true;
+          }
+        }
+        if (handled) event.preventDefault();
+        return;
+      }
+
+      if (event.code === "ArrowUp" || event.code === "MediaTrackPrevious") {
+        if (!items.length) return;
+        moveCandidateHotkeyNav(-1);
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowDown" || event.code === "MediaTrackNext") {
+        if (!items.length) return;
+        moveCandidateHotkeyNav(1);
+        event.preventDefault();
+        return;
+      }
+
+      if (event.code === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (t.closest("button, a[href], [role=button]")) return;
+        if (!items.length) return;
+        const item = items[Math.min(candidateHotkeyNavIndex, items.length - 1)];
+        if (item && item.form) {
+          event.preventDefault();
+          item.form.requestSubmit();
+        }
+        return;
+      }
+    }
+
+    document.addEventListener("keydown", onCandidateHotkeyNavKeydown);
 
     function esc(value) {
       return String(value || "")
@@ -589,12 +754,14 @@
       });
 
       if (candidatesContainer) {
-        candidatesContainer.innerHTML = blocks.join("");
-        initAudioPlayers(candidatesContainer);
-        scheduleCandidateThemePrecache(candidatesContainer);
-      }
-      if (emptyState) {
-        emptyState.hidden = blocks.length > 0;
+        if (blocks.length) {
+          candidatesContainer.innerHTML = blocks.join("");
+          initAudioPlayers(candidatesContainer);
+        } else {
+          candidatesContainer.innerHTML =
+            '<p id="apply-empty-state" class="muted-text">No candidates saved yet and no local theme found.</p>';
+        }
+        refreshCandidateHotkeyNav();
       }
     }
 
@@ -776,8 +943,8 @@
       });
       updateApplyRailsFromFailure(failed);
       setApplyProgressStatus("");
-      setApplyResult("Apply failed.");
-      showApplyProgressError(detail || "Apply failed.");
+      setApplyResult("Install failed.");
+      showApplyProgressError(detail || "Install failed.");
       if (applyThemeStepper) {
         applyThemeStepper.setAttribute("aria-valuetext", detail || "Apply failed.");
       }
@@ -789,7 +956,7 @@
       applyStepperReset();
       const m = String(msg || "").trim() || "Request failed.";
       setApplyProgressStatus("");
-      setApplyResult("Apply failed.");
+      setApplyResult("Install failed.");
       showApplyProgressError(m);
       if (applyThemeStepper) {
         applyThemeStepper.setAttribute("aria-valuetext", m);
@@ -1109,10 +1276,113 @@
       });
     }
 
+    const uploadThemeForm = document.getElementById("upload-theme-form");
+    const uploadThemeFileInput = document.getElementById("upload-theme-file-input");
+    const uploadThemePickBtn = document.getElementById("upload-theme-pick-btn");
+    if (uploadThemeForm && uploadThemeFileInput && uploadThemePickBtn) {
+      uploadThemePickBtn.addEventListener("click", function () {
+        uploadThemeFileInput.click();
+      });
+      uploadThemeForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+      });
+      uploadThemeFileInput.addEventListener("change", async function () {
+        if (!uploadThemeFileInput.files || !uploadThemeFileInput.files.length) return;
+        const originalPickText = uploadThemePickBtn.textContent || "";
+        showApplyThemeProgress();
+        uploadThemePickBtn.disabled = true;
+        uploadThemePickBtn.textContent = "Uploading…";
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        try {
+          const response = await fetch(uploadThemeForm.action, {
+            method: "POST",
+            body: new FormData(uploadThemeForm),
+            headers: {
+              "X-Requested-With": "fetch",
+              Accept: "application/x-ndjson, application/json",
+            },
+          });
+          const ct = (response.headers.get("content-type") || "").toLowerCase();
+          applyDbg("fetch upload response", { ok: response.ok, contentType: ct });
+          if (!response.ok) {
+            let msg = response.statusText || "Upload failed.";
+            if (ct.includes("json") && !ct.includes("ndjson")) {
+              try {
+                const errBody = await response.json();
+                if (errBody && errBody.message) msg = errBody.message;
+              } catch (_) {}
+            }
+            showApplyHttpError(msg);
+            return;
+          }
+          if (ct.includes("ndjson") || ct.includes("x-ndjson")) {
+            applyDbg("branch: upload NDJSON stream");
+            const lastDone = await readApplyNdjsonStream(response, applyProgressFromPayload);
+            if (!lastDone) {
+              applyStepperFailure({
+                error_detail: "No response from server.",
+                message: "",
+                failed_step: null,
+              });
+              return;
+            }
+            if (!lastDone.ok) {
+              return;
+            }
+            lastApplyEndedWithError = false;
+            lastApplyEndedWithSuccess = true;
+            updateApplyStepper(4);
+            clearApplyProgressError();
+            setApplyProgressStatus("");
+            setApplyResult("Complete.", "success");
+            appendDetailLog(lastDone.message || "Upload applied.", "success");
+            applyDbgStepper("after upload post-stream success sync");
+            if (lastDone.local_theme_url && findForm) {
+              findForm.dataset.localThemeInitial = "1";
+            }
+          } else {
+            applyDbg("branch: upload JSON (non-NDJSON)", { contentType: ct });
+            let payload = {};
+            try {
+              payload = await response.json();
+            } catch (_) {
+              payload = { ok: false, message: response.statusText || "Invalid response" };
+            }
+            if (!payload.ok) {
+              applyStepperFailure({
+                error_detail: String(payload.message || "Upload failed."),
+                message: "",
+                failed_step: null,
+              });
+              return;
+            }
+            lastApplyEndedWithError = false;
+            lastApplyEndedWithSuccess = true;
+            updateApplyStepper(4);
+            clearApplyProgressError();
+            setApplyProgressStatus("");
+            setApplyResult("Complete.", "success");
+            appendDetailLog(payload.message || "Upload applied.", "success");
+            if (payload.local_theme_url && findForm) {
+              findForm.dataset.localThemeInitial = "1";
+            }
+          }
+        } catch (err) {
+          const m = String(err && err.message ? err.message : err);
+          showApplyHttpError(m);
+        } finally {
+          applyDbg("upload finally → hideApplyThemeProgress");
+          hideApplyThemeProgress();
+          uploadThemeFileInput.value = "";
+          uploadThemePickBtn.disabled = false;
+          uploadThemePickBtn.textContent = originalPickText || "Upload custom theme…";
+        }
+      });
+    }
+
     initAudioPlayers(document);
     renderPreview();
-    scheduleCandidateThemePrecache(document);
-    schedulePosterPrecache(document);
+    refreshCandidateHotkeyNav();
   })();
 </script>
 {% endblock %}
